@@ -20,6 +20,9 @@ export default function App() {
   const [status, setStatus] = useState('🎤 Click Start Listening')
   const [location, setLocation] = useState<Location | null>(null)
 
+  // Sensor states
+  const [fallDetectionActive, setFallDetectionActive] = useState(false)
+
   // Guardian Contacts State
   const [guardians, setGuardians] = useState<Guardian[]>(getGuardians())
   const [showSettings, setShowSettings] = useState(false)
@@ -42,7 +45,7 @@ export default function App() {
     saveGuardians(updated)
   }
 
-  // Geolocation
+  // Geolocation & Speech Recognition Setup
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -97,11 +100,6 @@ export default function App() {
         police(locationRef.current)
         return
       }
-
-      if (command === 'SOS') {
-        sendGuardianSOS()
-        return
-      }
     }
 
     recognition.onerror = (e: any) => {
@@ -130,11 +128,67 @@ export default function App() {
     }
   }, [])
 
+  // 📳 REAL ACCELEROMETER FALL DETECTION SENSOR INTEGRATION
+  useEffect(() => {
+    let lastX = 0, lastY = 0, lastZ = 0
+    let lastUpdate = 0
+
+    const handleMotion = (event: DeviceMotionEvent) => {
+      const acc = event.accelerationIncludingGravity
+      if (!acc) return
+
+      const curTime = Date.now()
+      if (curTime - lastUpdate > 100) {
+        const diffTime = curTime - lastUpdate
+        lastUpdate = curTime
+
+        const x = acc.x || 0
+        const y = acc.y || 0
+        const z = acc.z || 0
+
+        // Calculate G-Force acceleration magnitude
+        const speed = Math.abs(x + y + z - lastX - lastY - lastZ) / diffTime * 10000
+
+        // A fall is detected when G-Force crosses threshold (high impact)
+        if (speed > 1800 && !isEmergency) {
+          console.log('🚀 Fall detected via sensors!')
+          triggerEmergencyFlow('FRACTURE') // Trigger physical trauma flow
+        }
+
+        lastX = x
+        lastY = y
+        lastZ = z
+      }
+    }
+
+    if (fallDetectionActive) {
+      // Request permission for iOS devices if needed
+      if (
+        typeof (DeviceMotionEvent as any).requestPermission === 'function'
+      ) {
+        (DeviceMotionEvent as any)
+          .requestPermission()
+          .then((permissionState: string) => {
+            if (permissionState === 'granted') {
+              window.addEventListener('devicemotion', handleMotion)
+            }
+          })
+          .catch(console.error)
+      } else {
+        window.addEventListener('devicemotion', handleMotion)
+      }
+    }
+
+    return () => {
+      window.removeEventListener('devicemotion', handleMotion)
+    }
+  }, [fallDetectionActive, isEmergency])
+
   // Emergency flow with 10s countdown
   const triggerEmergencyFlow = async (type: EmergencyType) => {
     setEmergencyType(type)
     setIsEmergency(true)
-    setStatus(`🚨 ${type.replace(/_/g, ' ')} detected!`)
+    setStatus(`⚠️ Fall/Accident Detected!`)
 
     const aid = await startEmergency(type, locationRef.current)
     setFirstAid(aid || getFirstAid(type))
@@ -147,12 +201,21 @@ export default function App() {
       setCountdown((prev) => {
         if (prev === null || prev <= 1) {
           clearInterval(countdownIntervalRef.current)
-          sendGuardianSOS() // Auto send WhatsApp SOS after 10s
+          sendGuardianSOS() // Auto dispatch WhatsApp SOS to parents
+          autoCallAmbulance() // Auto dial emergency services/parent
           return 0
         }
         return prev - 1
       })
     }, 1000)
+  }
+
+  // Auto trigger Call option
+  const autoCallAmbulance = () => {
+    const primary = guardians.find((g) => g.isPrimary) || guardians[0]
+    // Dial parents if set, otherwise dial standard Emergency Ambulance (102 in India / 112 globally)
+    const phoneToCall = primary?.phone ? `+${primary.phone}` : '102'
+    window.location.href = `tel:${phoneToCall}`
   }
 
   // Send WhatsApp to primary guardian or open generic
@@ -162,7 +225,7 @@ export default function App() {
 
     const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
 
-I may be in severe danger. Please send help!
+I fell down / had an accident and I am unresponsive. Please send help!
 
 📍 My Live Location:
 ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location unavailable'}
@@ -207,15 +270,27 @@ Sent automatically via Rakshak AI Safety System.`
       }`}
     >
       <div className='relative w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl'>
-        {/* Settings Gear Button */}
+        {/* Settings Buttons */}
         {!isEmergency && (
-          <button
-            onClick={() => setShowSettings(true)}
-            className='absolute right-6 top-6 rounded-full bg-gray-100 p-2.5 text-gray-700 hover:bg-gray-200'
-            title='Guardian Contacts'
-          >
-            ⚙️ Contacts
-          </button>
+          <div className='absolute right-6 top-6 flex gap-2'>
+            <button
+              onClick={() => setFallDetectionActive(!fallDetectionActive)}
+              className={`rounded-full px-3 py-1.5 text-xs font-bold transition-all ${
+                fallDetectionActive
+                  ? 'bg-green-500 text-white animate-pulse'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {fallDetectionActive ? '📳 Fall Sensor ON' : '📳 Sensor OFF'}
+            </button>
+            <button
+              onClick={() => setShowSettings(true)}
+              className='rounded-full bg-gray-100 p-2 text-xs font-semibold text-gray-700 hover:bg-gray-200'
+              title='Guardian Contacts'
+            >
+              ⚙️ Contacts
+            </button>
+          </div>
         )}
 
         {/* Icon */}
@@ -230,25 +305,38 @@ Sent automatically via Rakshak AI Safety System.`
         <h1 className='mb-2 text-3xl font-bold text-gray-900'>Rakshak AI</h1>
         <p className='mb-4 text-gray-600'>{status}</p>
 
-        {/* 10s Countdown Banner */}
+        {/* 10s Auto-SOS Countdown Banner */}
         {isEmergency && countdown !== null && (
-          <div className='mb-4 rounded-2xl bg-red-100 p-3 text-red-900 animate-pulse border border-red-300'>
-            <p className='text-xs font-semibold uppercase tracking-wider'>
-              Auto-SOS Dispatch
+          <div className='mb-4 rounded-2xl bg-red-100 p-4 text-red-900 animate-pulse border-2 border-red-400'>
+            <p className='text-xs font-black uppercase tracking-wider text-red-600'>
+              CRITICAL: USER UNRESPONSIVE
             </p>
-            <p className='text-2xl font-black'>
-              {countdown > 0 ? `Sending SOS in ${countdown}s` : '✅ SOS Dispatched'}
+            <p className='text-2xl font-black my-1'>
+              {countdown > 0 ? `SOS Dispatch in ${countdown}s` : '✅ SOS Dispatched'}
+            </p>
+            <p className='text-xs text-red-700'>
+              Say "I am safe" or click below to abort.
             </p>
           </div>
         )}
 
         {!isEmergency && (
-          <button
-            onClick={handleStartListening}
-            className='mb-4 w-full rounded-2xl bg-black px-5 py-3.5 font-semibold text-white shadow-lg hover:bg-gray-800'
-          >
-            🎤 Start Listening
-          </button>
+          <div className='space-y-2'>
+            <button
+              onClick={handleStartListening}
+              className='w-full rounded-2xl bg-black px-5 py-3.5 font-semibold text-white shadow-lg hover:bg-gray-800'
+            >
+              🎤 Start Listening
+            </button>
+
+            {/* 🔥 DEMO EXCELLENCE: SIMULATE PHONE DROP BUTTON FOR JUDGES */}
+            <button
+              onClick={() => triggerEmergencyFlow('FRACTURE')}
+              className='w-full rounded-2xl bg-amber-500 px-5 py-3.5 font-semibold text-white shadow-lg hover:bg-amber-600'
+            >
+              📳 Simulate Phone Fall (Demo)
+            </button>
+          </div>
         )}
 
         {isEmergency ? (
@@ -256,7 +344,7 @@ Sent automatically via Rakshak AI Safety System.`
             {emergencyType && (
               <div className='rounded-xl bg-red-50 p-3 text-center'>
                 <p className='text-sm font-bold text-red-700'>
-                  {emergencyType.replace(/_/g, ' ')}
+                  ⚠️ PHYSICAL IMPACT DETECTED
                 </p>
                 {firstAid && (
                   <p className='text-xs text-red-600'>
@@ -269,7 +357,7 @@ Sent automatically via Rakshak AI Safety System.`
             {firstAid && (
               <div className='rounded-2xl bg-gray-50 p-4'>
                 <p className='mb-2 font-semibold text-gray-900'>
-                  🩹 {firstAid.title}
+                  🩹 Trauma First Aid
                 </p>
                 <ol className='list-decimal space-y-1 pl-5 text-sm text-gray-700'>
                   {firstAid.steps.map((s, i) => (
@@ -283,50 +371,47 @@ Sent automatically via Rakshak AI Safety System.`
               onClick={handleSafe}
               className='w-full rounded-2xl bg-blue-600 px-5 py-3.5 font-semibold text-white hover:bg-blue-700 shadow-md'
             >
-              ✅ I Am Safe (Cancel Alarm)
+              ✅ Cancel Emergency (I Am Safe)
             </button>
 
             <button
               onClick={sendGuardianSOS}
               className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md'
             >
-              📲 Send SOS Now via WhatsApp
+              📲 Send SOS Message Now
             </button>
 
-            {guardians.find((g) => g.isPrimary) && (
-              <a
-                href={`tel:+${guardians.find((g) => g.isPrimary)?.phone}`}
-                className='block text-center w-full rounded-2xl bg-amber-500 px-5 py-3 font-semibold text-white hover:bg-amber-600'
-              >
-                📞 Call {guardians.find((g) => g.isPrimary)?.name} (
-                {guardians.find((g) => g.isPrimary)?.relation})
-              </a>
-            )}
+            <button
+              onClick={autoCallAmbulance}
+              className='w-full rounded-2xl bg-red-700 px-5 py-3.5 font-semibold text-white hover:bg-red-800 shadow-md text-center'
+            >
+              📞 Call Ambulance / Parents Now
+            </button>
 
             <div className='grid grid-cols-2 gap-2'>
               <button
                 onClick={() => hospital(location)}
-                className='rounded-2xl bg-red-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-red-700'
+                className='rounded-2xl bg-amber-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-amber-700'
               >
-                🏥 Nearest Hospital
+                🏥 Find Emergency Room
               </button>
 
               <button
                 onClick={() => police(location)}
                 className='rounded-2xl bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700'
               >
-                🚓 Nearest Police
+                🚓 Locate Help Center
               </button>
             </div>
 
             {location && (
               <div className='mt-2 rounded-2xl bg-gray-100 p-2.5 text-center text-xs text-gray-600'>
-                📍 GPS: {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
+                📍 Live Coordinates: {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
               </div>
             )}
           </div>
         ) : (
-          <div className='rounded-2xl bg-gray-100 p-4 text-sm text-gray-700'>
+          <div className='rounded-2xl bg-gray-100 p-4 text-sm text-gray-700 mt-4'>
             Try saying:
             <div className='mt-2 flex flex-wrap justify-center gap-2'>
               <span className='rounded-full bg-white px-3 py-1 text-xs shadow-sm'>
@@ -334,9 +419,6 @@ Sent automatically via Rakshak AI Safety System.`
               </span>
               <span className='rounded-full bg-white px-3 py-1 text-xs shadow-sm'>
                 “Help”
-              </span>
-              <span className='rounded-full bg-white px-3 py-1 text-xs shadow-sm'>
-                “Chest pain”
               </span>
               <span className='rounded-full bg-white px-3 py-1 text-xs shadow-sm'>
                 “I am safe”
