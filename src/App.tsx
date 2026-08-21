@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { parseCommand, detectEmergencyType } from './voice/parser'
 import type { Location, EmergencyType } from './types/emergency'
+import type { Guardian } from './types/guardian'
 import { getFirstAid } from './ai/firstAidAI'
 import type { FirstAidResponse } from './ai/firstAidAI'
 import {
@@ -8,8 +9,9 @@ import {
   cancelEmergency,
   hospital,
   police,
-  sendSOS,
 } from './actions/actions'
+import { getGuardians, saveGuardians } from './utils/guardianStorage'
+import GuardianSettings from './components/GuardianSettings'
 
 export default function App() {
   const [isEmergency, setIsEmergency] = useState(false)
@@ -18,15 +20,29 @@ export default function App() {
   const [status, setStatus] = useState('🎤 Click Start Listening')
   const [location, setLocation] = useState<Location | null>(null)
 
+  // Guardian Contacts State
+  const [guardians, setGuardians] = useState<Guardian[]>(getGuardians())
+  const [showSettings, setShowSettings] = useState(false)
+
+  // 10s Countdown State
+  const [countdown, setCountdown] = useState<number | null>(null)
+  const countdownIntervalRef = useRef<any>(null)
+
   const recognitionRef = useRef<any>(null)
   const locationRef = useRef<Location | null>(null)
   const isListeningRef = useRef(false)
 
-  // sync location ref to avoid stale closure
   useEffect(() => {
     locationRef.current = location
   }, [location])
 
+  // Save guardians on update
+  const handleGuardiansUpdate = (updated: Guardian[]) => {
+    setGuardians(updated)
+    saveGuardians(updated)
+  }
+
+  // Geolocation
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -42,7 +58,7 @@ export default function App() {
       (window as any).webkitSpeechRecognition
 
     if (!SpeechRecognition) {
-      setStatus('Speech not supported in this browser')
+      setStatus('Speech recognition not supported')
       return
     }
 
@@ -62,24 +78,13 @@ export default function App() {
       const command = parseCommand(transcript)
 
       if (command === 'SAFE') {
-        isListeningRef.current = true // keep listening
-        setIsEmergency(false)
-        setEmergencyType(null)
-        setFirstAid(null)
-        setStatus('🎤 Click Start Listening')
-        cancelEmergency()
+        handleSafe()
         return
       }
 
       if (command === 'EMERGENCY') {
         const type = detectEmergencyType(transcript)
-        setEmergencyType(type)
-        setIsEmergency(true)
-        setStatus(`🚨 ${type.replace(/_/g, ' ')} detected!`)
-
-        const aid = await startEmergency(type, locationRef.current)
-        if (aid) setFirstAid(aid)
-        else setFirstAid(getFirstAid(type))
+        triggerEmergencyFlow(type)
         return
       }
 
@@ -94,13 +99,8 @@ export default function App() {
       }
 
       if (command === 'SOS') {
-        sendSOS(locationRef.current)
+        sendGuardianSOS()
         return
-      }
-
-      if (command === 'FIRST_AID' && emergencyType) {
-        const aid = getFirstAid(emergencyType)
-        setFirstAid(aid)
       }
     }
 
@@ -112,7 +112,6 @@ export default function App() {
     }
 
     recognition.onend = () => {
-      // auto restart if user was listening
       if (isListeningRef.current) {
         try {
           recognition.start()
@@ -124,11 +123,58 @@ export default function App() {
 
     return () => {
       isListeningRef.current = false
+      clearInterval(countdownIntervalRef.current)
       try {
         recognition.stop()
       } catch {}
     }
   }, [])
+
+  // Emergency flow with 10s countdown
+  const triggerEmergencyFlow = async (type: EmergencyType) => {
+    setEmergencyType(type)
+    setIsEmergency(true)
+    setStatus(`🚨 ${type.replace(/_/g, ' ')} detected!`)
+
+    const aid = await startEmergency(type, locationRef.current)
+    setFirstAid(aid || getFirstAid(type))
+
+    // Start 10s countdown
+    setCountdown(10)
+    clearInterval(countdownIntervalRef.current)
+
+    countdownIntervalRef.current = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(countdownIntervalRef.current)
+          sendGuardianSOS() // Auto send WhatsApp SOS after 10s
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+  }
+
+  // Send WhatsApp to primary guardian or open generic
+  const sendGuardianSOS = () => {
+    const loc = locationRef.current
+    const primary = guardians.find((g) => g.isPrimary) || guardians[0]
+
+    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
+
+I may be in severe danger. Please send help!
+
+📍 My Live Location:
+${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location unavailable'}
+
+Sent automatically via Rakshak AI Safety System.`
+
+    const phoneParam = primary?.phone ? `phone=${primary.phone}&` : ''
+    window.open(
+      `https://api.whatsapp.com/send?${phoneParam}text=${encodeURIComponent(msg)}`,
+      '_blank'
+    )
+  }
 
   const handleStartListening = () => {
     try {
@@ -142,6 +188,8 @@ export default function App() {
 
   const handleSafe = () => {
     isListeningRef.current = false
+    clearInterval(countdownIntervalRef.current)
+    setCountdown(null)
     try {
       recognitionRef.current?.stop()
     } catch {}
@@ -158,7 +206,19 @@ export default function App() {
         isEmergency ? 'bg-red-600' : 'bg-gray-950'
       }`}
     >
-      <div className='w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl'>
+      <div className='relative w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl'>
+        {/* Settings Gear Button */}
+        {!isEmergency && (
+          <button
+            onClick={() => setShowSettings(true)}
+            className='absolute right-6 top-6 rounded-full bg-gray-100 p-2.5 text-gray-700 hover:bg-gray-200'
+            title='Guardian Contacts'
+          >
+            ⚙️ Contacts
+          </button>
+        )}
+
+        {/* Icon */}
         <div
           className={`mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full ${
             isEmergency ? 'bg-red-100' : 'bg-green-100'
@@ -168,12 +228,24 @@ export default function App() {
         </div>
 
         <h1 className='mb-2 text-3xl font-bold text-gray-900'>Rakshak AI</h1>
-        <p className='mb-6 text-gray-600'>{status}</p>
+        <p className='mb-4 text-gray-600'>{status}</p>
+
+        {/* 10s Countdown Banner */}
+        {isEmergency && countdown !== null && (
+          <div className='mb-4 rounded-2xl bg-red-100 p-3 text-red-900 animate-pulse border border-red-300'>
+            <p className='text-xs font-semibold uppercase tracking-wider'>
+              Auto-SOS Dispatch
+            </p>
+            <p className='text-2xl font-black'>
+              {countdown > 0 ? `Sending SOS in ${countdown}s` : '✅ SOS Dispatched'}
+            </p>
+          </div>
+        )}
 
         {!isEmergency && (
           <button
             onClick={handleStartListening}
-            className='mb-4 w-full rounded-2xl bg-black px-5 py-3 font-semibold text-white hover:bg-gray-800'
+            className='mb-4 w-full rounded-2xl bg-black px-5 py-3.5 font-semibold text-white shadow-lg hover:bg-gray-800'
           >
             🎤 Start Listening
           </button>
@@ -187,14 +259,18 @@ export default function App() {
                   {emergencyType.replace(/_/g, ' ')}
                 </p>
                 {firstAid && (
-                  <p className='text-xs text-red-600'>{firstAid.severity} • {firstAid.title}</p>
+                  <p className='text-xs text-red-600'>
+                    {firstAid.severity} • {firstAid.title}
+                  </p>
                 )}
               </div>
             )}
 
             {firstAid && (
               <div className='rounded-2xl bg-gray-50 p-4'>
-                <p className='mb-2 font-semibold text-gray-900'>🩹 {firstAid.title}</p>
+                <p className='mb-2 font-semibold text-gray-900'>
+                  🩹 {firstAid.title}
+                </p>
                 <ol className='list-decimal space-y-1 pl-5 text-sm text-gray-700'>
                   {firstAid.steps.map((s, i) => (
                     <li key={i}>{s}</li>
@@ -205,35 +281,47 @@ export default function App() {
 
             <button
               onClick={handleSafe}
-              className='w-full rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700'
+              className='w-full rounded-2xl bg-blue-600 px-5 py-3.5 font-semibold text-white hover:bg-blue-700 shadow-md'
             >
-              ✅ I Am Safe
+              ✅ I Am Safe (Cancel Alarm)
             </button>
 
             <button
-              onClick={() => hospital(location)}
-              className='w-full rounded-2xl bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700'
+              onClick={sendGuardianSOS}
+              className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md'
             >
-              🏥 Open Nearest Hospital
+              📲 Send SOS Now via WhatsApp
             </button>
 
-            <button
-              onClick={() => police(location)}
-              className='w-full rounded-2xl bg-indigo-600 px-5 py-3 font-semibold text-white'
-            >
-              🚓 Open Nearest Police
-            </button>
+            {guardians.find((g) => g.isPrimary) && (
+              <a
+                href={`tel:+${guardians.find((g) => g.isPrimary)?.phone}`}
+                className='block text-center w-full rounded-2xl bg-amber-500 px-5 py-3 font-semibold text-white hover:bg-amber-600'
+              >
+                📞 Call {guardians.find((g) => g.isPrimary)?.name} (
+                {guardians.find((g) => g.isPrimary)?.relation})
+              </a>
+            )}
 
-            <button
-              onClick={() => sendSOS(location)}
-              className='w-full rounded-2xl bg-green-600 px-5 py-3 font-semibold text-white hover:bg-green-700'
-            >
-              📲 Send SOS via WhatsApp
-            </button>
+            <div className='grid grid-cols-2 gap-2'>
+              <button
+                onClick={() => hospital(location)}
+                className='rounded-2xl bg-red-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-red-700'
+              >
+                🏥 Nearest Hospital
+              </button>
+
+              <button
+                onClick={() => police(location)}
+                className='rounded-2xl bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700'
+              >
+                🚓 Nearest Police
+              </button>
+            </div>
 
             {location && (
-              <div className='mt-2 rounded-2xl bg-gray-100 p-3 text-center text-xs text-gray-700'>
-                📍 {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
+              <div className='mt-2 rounded-2xl bg-gray-100 p-2.5 text-center text-xs text-gray-600'>
+                📍 GPS: {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
               </div>
             )}
           </div>
@@ -241,12 +329,29 @@ export default function App() {
           <div className='rounded-2xl bg-gray-100 p-4 text-sm text-gray-700'>
             Try saying:
             <div className='mt-2 flex flex-wrap justify-center gap-2'>
-              <span className='rounded-full bg-white px-3 py-1'>Accident</span>
-              <span className='rounded-full bg-white px-3 py-1'>Help</span>
-              <span className='rounded-full bg-white px-3 py-1'>Chest pain</span>
-              <span className='rounded-full bg-white px-3 py-1'>I am safe</span>
+              <span className='rounded-full bg-white px-3 py-1 text-xs shadow-sm'>
+                “Accident”
+              </span>
+              <span className='rounded-full bg-white px-3 py-1 text-xs shadow-sm'>
+                “Help”
+              </span>
+              <span className='rounded-full bg-white px-3 py-1 text-xs shadow-sm'>
+                “Chest pain”
+              </span>
+              <span className='rounded-full bg-white px-3 py-1 text-xs shadow-sm'>
+                “I am safe”
+              </span>
             </div>
           </div>
+        )}
+
+        {/* Guardian Settings Modal */}
+        {showSettings && (
+          <GuardianSettings
+            guardians={guardians}
+            onUpdate={handleGuardiansUpdate}
+            onClose={() => setShowSettings(false)}
+          />
         )}
       </div>
     </div>
