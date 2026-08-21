@@ -11,7 +11,7 @@ export function getGuardians(): Guardian[] {
         {
           id: '1',
           name: 'Primary Contact',
-          phone: '9905740936',
+          phone: '+919905740936',
           relation: 'Mom',
           isPrimary: true,
         },
