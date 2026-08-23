@@ -17,12 +17,14 @@ import {
   triggerDirectWhatsApp,
   triggerDirectSMS,
   formatPhoneWithCountryCode,
+  getWhatsAppDeepLink,
+  getSMSDeepLink,
 } from './utils/whatsapp'
 import GuardianSettings from './components/GuardianSettings'
 
 export default function App() {
   const [isEmergency, setIsEmergency] = useState(false)
-  const [emergencyType, setEmergencyType] = useState<EmergencyType | null>(null)
+  const [currentEmergencyType, setCurrentEmergencyType] = useState<EmergencyType | null>(null)
   const [firstAid, setFirstAid] = useState<FirstAidResponse | null>(null)
   const [status, setStatus] = useState('🛡️ Rakshak 24/7 Shield Active')
   const [location, setLocation] = useState<Location | null>(null)
@@ -163,7 +165,7 @@ export default function App() {
   // 🚨 AUTONOMOUS DISPATCH ENGINE
   const triggerAutonomousEmergency = async (type: EmergencyType) => {
     setIsEmergency(true)
-    setEmergencyType(type)
+    setCurrentEmergencyType(type)
     setStatus(`⚠️ CRITICAL EMERGENCY DETECTED`)
 
     const aid = await startEmergency(type, locationRef.current)
@@ -187,10 +189,10 @@ export default function App() {
 
   // ⚡ AUTO-DISPATCH EXECUTOR
   const executeAutonomousDispatch = async (type: EmergencyType) => {
-    // 1. Cloud Webhook Alert
+    // 1. Send Auto Cloud Webhook
     await sendAutoCloudAlert(guardiansRef.current, locationRef.current, type)
 
-    // 2. Direct Android Intent WhatsApp Launch
+    // 2. Direct WhatsApp Trigger
     sendGuardianWhatsApp()
 
     // 3. Auto Dial Ambulance (102)
@@ -232,11 +234,16 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
     clearInterval(countdownIntervalRef.current)
     setCountdown(null)
     setIsEmergency(false)
-    setEmergencyType(null)
+    setCurrentEmergencyType(null)
     setFirstAid(null)
     setStatus('🛡️ Rakshak 24/7 Shield Active')
     cancelEmergency()
   }
+
+  const primaryContact = guardians.find((g) => g.isPrimary) || guardians[0]
+  const emergencyMsg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\nVictim UNRESPONSIVE!\nLocation: ${
+    location ? `https://maps.google.com/?q=${location.lat},${location.lng}` : 'Unavailable'
+  }`
 
   return (
     <div
@@ -278,12 +285,12 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
         {isEmergency && (
           <div className='mb-4 rounded-2xl bg-red-100 p-4 text-red-900 animate-pulse border-2 border-red-400'>
             <p className='text-xs font-black uppercase tracking-wider text-red-600'>
-              AUTOMATIC EMERGENCY PROTOCOL
+              AUTOMATIC EMERGENCY PROTOCOL ({currentEmergencyType?.replace(/_/g, ' ') || 'TRAUMA'})
             </p>
             <p className='text-2xl font-black my-1'>
               {countdown !== null && countdown > 0
                 ? `Auto-Dispatch in ${countdown}s`
-                : '✅ Emergency Protocols Triggered'}
+                : '✅ Emergency Dispatched'}
             </p>
           </div>
         )}
@@ -330,21 +337,19 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
               ✅ I Am Safe (Abort Emergency)
             </button>
 
-            {/* Direct Android Native Intent Trigger */}
-            <button
-              onClick={sendGuardianWhatsApp}
-              className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md text-center'
+            <a
+              href={getWhatsAppDeepLink(primaryContact?.phone || '', emergencyMsg)}
+              className='block w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md text-center'
             >
-              📲 Open Direct WhatsApp App
-            </button>
+              📲 Open Direct WhatsApp
+            </a>
 
-            {/* Direct SMS Fallback (ZERO WEB PAGES!) */}
-            <button
-              onClick={sendGuardianSMS}
-              className='w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md text-center'
+            <a
+              href={getSMSDeepLink(primaryContact?.phone || '', emergencyMsg)}
+              className='block w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md text-center'
             >
-              💬 Send Direct Phone SMS (Instant)
-            </button>
+              💬 Send Phone SMS (Offline)
+            </a>
 
             <button
               onClick={() => {
