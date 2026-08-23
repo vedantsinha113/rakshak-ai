@@ -29,11 +29,9 @@ export default function App() {
   const [status, setStatus] = useState('🛡️ Rakshak 24/7 Shield Active')
   const [location, setLocation] = useState<Location | null>(null)
 
-  // Guardian Contacts State
   const [guardians, setGuardians] = useState<Guardian[]>(getGuardians())
   const [showSettings, setShowSettings] = useState(false)
 
-  // 10s Autonomous Countdown
   const [countdown, setCountdown] = useState<number | null>(null)
   const countdownIntervalRef = useRef<any>(null)
 
@@ -60,7 +58,6 @@ export default function App() {
     saveGuardians(updated)
   }
 
-  // 🌐 Geolocation + Sensor Setup
   useEffect(() => {
     requestWakeLock()
 
@@ -124,7 +121,6 @@ export default function App() {
     }
   }, [])
 
-  // 📳 ALWAYS-ON ACCELEROMETER SENSOR
   useEffect(() => {
     let lastX = 0, lastY = 0, lastZ = 0
     let lastUpdate = 0
@@ -162,7 +158,6 @@ export default function App() {
     }
   }, [])
 
-  // 🚨 AUTONOMOUS DISPATCH ENGINE
   const triggerAutonomousEmergency = async (type: EmergencyType) => {
     setIsEmergency(true)
     setCurrentEmergencyType(type)
@@ -171,7 +166,6 @@ export default function App() {
     const aid = await startEmergency(type, locationRef.current)
     setFirstAid(aid || getFirstAid(type))
 
-    // 10s Countdown
     setCountdown(10)
     clearInterval(countdownIntervalRef.current)
 
@@ -187,33 +181,12 @@ export default function App() {
     }, 1000)
   }
 
-  // ⚡ AUTO-DISPATCH EXECUTOR
-  const executeAutonomousDispatch = async (type: EmergencyType) => {
-    // 1. Send Auto Cloud Webhook
-    await sendAutoCloudAlert(guardiansRef.current, locationRef.current, type)
-
-    // 2. Direct WhatsApp Trigger
-    sendGuardianWhatsApp()
-
-    // 3. Auto Dial Ambulance (102)
-    setTimeout(() => {
-      window.location.href = 'tel:102'
-    }, 2000)
-  }
-
   const sendGuardianWhatsApp = () => {
     const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
     const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
     const loc = locationRef.current
 
-    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
-
-I fell down / met with an accident and I am UNRESPONSIVE!
-
-📍 My Live Location:
-${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location Unavailable'}
-
-Sent automatically via Rakshak AI Safety App.`
+    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\n\nI fell down / met with an accident and I am UNRESPONSIVE!\n\n📍 My Live Location:\n${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location Unavailable'}\n\nSent automatically via Rakshak AI Safety App.`
 
     triggerDirectWhatsApp(targetPhone, msg)
   }
@@ -223,11 +196,19 @@ Sent automatically via Rakshak AI Safety App.`
     const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
     const loc = locationRef.current
 
-    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
-Victim UNRESPONSIVE.
-Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
+    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\nVictim UNRESPONSIVE.\nLocation: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
 
     triggerDirectSMS(targetPhone, msg)
+  }
+
+  const executeAutonomousDispatch = async (type: EmergencyType) => {
+    await sendAutoCloudAlert(guardiansRef.current, locationRef.current, type)
+    sendGuardianWhatsApp()
+    sendGuardianSMS()
+
+    setTimeout(() => {
+      window.location.href = 'tel:102'
+    }, 2000)
   }
 
   const handleSafe = () => {
@@ -252,7 +233,6 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
       }`}
     >
       <div className='relative w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl'>
-        {/* Contacts Gear Button */}
         {!isEmergency && (
           <button
             onClick={() => setShowSettings(true)}
@@ -281,7 +261,6 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
 
         <p className='mb-4 text-gray-600'>{status}</p>
 
-        {/* 10s SOS Countdown Box */}
         {isEmergency && (
           <div className='mb-4 rounded-2xl bg-red-100 p-4 text-red-900 animate-pulse border-2 border-red-400'>
             <p className='text-xs font-black uppercase tracking-wider text-red-600'>
@@ -337,19 +316,19 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
               ✅ I Am Safe (Abort Emergency)
             </button>
 
-            <a
-              href={getWhatsAppDeepLink(primaryContact?.phone || '', emergencyMsg)}
-              className='block w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md text-center'
+            <button
+              onClick={sendGuardianWhatsApp}
+              className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md text-center'
             >
-              📲 Open Direct WhatsApp
-            </a>
+              📲 Open Direct WhatsApp ({getWhatsAppDeepLink(primaryContact?.phone || '', emergencyMsg) ? 'App' : ''})
+            </button>
 
-            <a
-              href={getSMSDeepLink(primaryContact?.phone || '', emergencyMsg)}
-              className='block w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md text-center'
+            <button
+              onClick={sendGuardianSMS}
+              className='w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md text-center'
             >
-              💬 Send Phone SMS (Offline)
-            </a>
+              💬 Send Phone SMS ({getSMSDeepLink(primaryContact?.phone || '', emergencyMsg) ? 'Offline' : ''})
+            </button>
 
             <button
               onClick={() => {
@@ -378,7 +357,6 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
           </div>
         )}
 
-        {/* Guardian Settings Modal */}
         {showSettings && (
           <GuardianSettings
             guardians={guardians}
