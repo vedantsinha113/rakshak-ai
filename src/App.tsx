@@ -181,7 +181,7 @@ export default function App() {
     }, 1000)
   }
 
-  const sendGuardianWhatsApp = () => {
+  const handleSendWhatsApp = () => {
     const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
     const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
     const loc = locationRef.current
@@ -191,7 +191,7 @@ export default function App() {
     triggerDirectWhatsApp(targetPhone, msg)
   }
 
-  const sendGuardianSMS = () => {
+  const handleSendSMS = () => {
     const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
     const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
     const loc = locationRef.current
@@ -203,8 +203,8 @@ export default function App() {
 
   const executeAutonomousDispatch = async (type: EmergencyType) => {
     await sendAutoCloudAlert(guardiansRef.current, locationRef.current, type)
-    sendGuardianWhatsApp()
-    sendGuardianSMS()
+    handleSendWhatsApp()
+    handleSendSMS()
 
     setTimeout(() => {
       window.location.href = 'tel:102'
@@ -317,18 +317,32 @@ export default function App() {
             </button>
 
             <button
-              onClick={sendGuardianWhatsApp}
+              onClick={handleSendWhatsApp}
               className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md text-center'
             >
-              📲 Open Direct WhatsApp ({getWhatsAppDeepLink(primaryContact?.phone || '', emergencyMsg) ? 'App' : ''})
+              📲 Open Direct WhatsApp App
             </button>
 
             <button
-              onClick={sendGuardianSMS}
+              onClick={handleSendSMS}
               className='w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md text-center'
             >
-              💬 Send Phone SMS ({getSMSDeepLink(primaryContact?.phone || '', emergencyMsg) ? 'Offline' : ''})
+              💬 Send Direct Phone SMS
             </button>
+
+            <a
+              href={getWhatsAppDeepLink(primaryContact?.phone || '', emergencyMsg)}
+              className='hidden'
+            >
+              WhatsApp Backup
+            </a>
+
+            <a
+              href={getSMSDeepLink(primaryContact?.phone || '', emergencyMsg)}
+              className='hidden'
+            >
+              SMS Backup
+            </a>
 
             <button
               onClick={() => {

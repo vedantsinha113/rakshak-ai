@@ -1,21 +1,26 @@
-// Format phone number to clean Indian format (+91)
+// Strictly formats any phone number to 91XXXXXXXXXX format required by WhatsApp
 export function formatPhoneWithCountryCode(phone: string): string {
   if (!phone) return '919876543210'
-  let clean = phone.replace(/[^0-9]/g, '')
+  
+  // Remove all non-numeric characters (spaces, dashes, +, etc.)
+  let digits = phone.replace(/\D/g, '')
 
-  if (clean.length === 10) {
-    clean = '91' + clean
+  // If 10-digit number, add 91 prefix
+  if (digits.length === 10) {
+    digits = '91' + digits
   }
 
-  return clean
+  return digits
 }
 
+// Generates Direct Native WhatsApp Deep Link
 export function getWhatsAppDeepLink(phone: string, text: string): string {
   const cleanPhone = formatPhoneWithCountryCode(phone)
   const encodedText = encodeURIComponent(text)
-  return `https://wa.me/${cleanPhone}?text=${encodedText}`
+  return `whatsapp://send?phone=${cleanPhone}&text=${encodedText}`
 }
 
+// Generates Direct Phone SMS Deep Link (Offline)
 export function getSMSDeepLink(phone: string, text: string): string {
   const cleanPhone = formatPhoneWithCountryCode(phone)
   const encodedText = encodeURIComponent(text)
@@ -23,16 +28,13 @@ export function getSMSDeepLink(phone: string, text: string): string {
 }
 
 export function triggerDirectWhatsApp(phone: string, text: string): void {
-  const cleanPhone = formatPhoneWithCountryCode(phone)
-  const encodedText = encodeURIComponent(text)
-  const url = `https://wa.me/${cleanPhone}?text=${encodedText}`
-  window.open(url, '_blank')
+  const link = getWhatsAppDeepLink(phone, text)
+  window.location.href = link
 }
 
 export function triggerDirectSMS(phone: string, text: string): void {
-  const cleanPhone = formatPhoneWithCountryCode(phone)
-  const encodedText = encodeURIComponent(text)
-  window.location.href = `sms:+${cleanPhone}?body=${encodedText}`
+  const link = getSMSDeepLink(phone, text)
+  window.location.href = link
 }
 
 export function sendSOS(location: { lat: number; lng: number } | null): void {
