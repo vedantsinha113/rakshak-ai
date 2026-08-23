@@ -13,6 +13,7 @@ import {
 import { getGuardians, saveGuardians } from './utils/guardianStorage'
 import { sendAutoCloudAlert } from './services/smsService'
 import { requestWakeLock, releaseWakeLock } from './utils/wakeLock'
+import { triggerDirectWhatsApp, formatPhoneWithCountryCode } from './utils/whatsapp'
 import GuardianSettings from './components/GuardianSettings'
 
 export default function App() {
@@ -28,7 +29,6 @@ export default function App() {
 
   // 10s Autonomous Countdown
   const [countdown, setCountdown] = useState<number | null>(null)
-  const [autoDispatched, setAutoDispatched] = useState(false)
   const countdownIntervalRef = useRef<any>(null)
 
   const recognitionRef = useRef<any>(null)
@@ -54,7 +54,7 @@ export default function App() {
     saveGuardians(updated)
   }
 
-  // 🌐 Geolocation + WakeLock Initialization
+  // 🌐 Geolocation + Sensor Setup
   useEffect(() => {
     requestWakeLock()
 
@@ -84,7 +84,7 @@ export default function App() {
             .toLowerCase()
             .trim()
 
-        console.log('Voice Command Heard:', transcript)
+        console.log('Heard:', transcript)
         const command = parseCommand(transcript)
 
         if (command === 'SAFE') {
@@ -100,7 +100,7 @@ export default function App() {
       }
 
       recognition.onerror = (e: any) => {
-        if (e.error !== 'no-speech') setStatus('🛡️ Shield Active (Listening)')
+        if (e.error !== 'no-speech') setStatus('🛡️ Shield Active')
       }
 
       recognition.onend = () => {
@@ -118,7 +118,7 @@ export default function App() {
     }
   }, [])
 
-  // 📳 ALWAYS-ON BACKGROUND ACCELEROMETER SENSOR
+  // 📳 ALWAYS-ON ACCELEROMETER SENSOR
   useEffect(() => {
     let lastX = 0, lastY = 0, lastZ = 0
     let lastUpdate = 0
@@ -140,9 +140,7 @@ export default function App() {
 
         const speed = Math.abs(x + y + z - lastX - lastY - lastZ) / diffTime * 10000
 
-        // Physical crash / hard fall threshold
         if (speed > 1600 && !isEmergencyRef.current) {
-          console.log('🚀 Autonomous Fall Detected!')
           triggerAutonomousEmergency('ROAD_ACCIDENT')
         }
 
@@ -158,17 +156,16 @@ export default function App() {
     }
   }, [])
 
-  // 🚨 AUTONOMOUS ZERO-TOUCH DISPATCH ENGINE
+  // 🚨 AUTONOMOUS DISPATCH ENGINE
   const triggerAutonomousEmergency = async (type: EmergencyType) => {
     setIsEmergency(true)
     setEmergencyType(type)
-    setAutoDispatched(false)
-    setStatus(`⚠️ CRITICAL CRASH / FALL DETECTED`)
+    setStatus(`⚠️ CRITICAL EMERGENCY DETECTED`)
 
     const aid = await startEmergency(type, locationRef.current)
     setFirstAid(aid || getFirstAid(type))
 
-    // 10s Autonomous Countdown before auto dispatch
+    // 10s Countdown
     setCountdown(10)
     clearInterval(countdownIntervalRef.current)
 
@@ -184,33 +181,41 @@ export default function App() {
     }, 1000)
   }
 
-  // ⚡ AUTO-DISPATCH WHEN COUNTDOWN HITS 0
+  // ⚡ AUTO-DISPATCH EXECUTOR
   const executeAutonomousDispatch = async (type: EmergencyType) => {
-    setAutoDispatched(true)
-
-    // 1. Automatically send Cloud SMS to Parents (Zero click)
+    // 1. Send Auto Cloud Notification
     await sendAutoCloudAlert(guardiansRef.current, locationRef.current, type)
 
-    // 2. Open automated WhatsApp backup alert
-    const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
-    const loc = locationRef.current
-    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
-Victim is unconscious / had an accident.
-Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
+    // 2. Launch Native WhatsApp App directly
+    sendGuardianWhatsApp()
 
-    const phoneParam = primary?.phone ? `phone=${primary.phone}&` : ''
-    window.open(`https://api.whatsapp.com/send?${phoneParam}text=${encodeURIComponent(msg)}`, '_blank')
-
-    // 3. Automatically trigger Emergency Ambulance dialer (102 / 112)
+    // 3. Auto Dial Ambulance (102)
     setTimeout(() => {
       window.location.href = 'tel:102'
     }, 1500)
   }
 
+  const sendGuardianWhatsApp = () => {
+    const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
+    const targetPhone = primary?.phone ? formatPhoneWithCountryCode(primary.phone) : '919876543210'
+    const loc = locationRef.current
+
+    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
+
+I fell down / met with an accident and I am UNRESPONSIVE!
+
+📍 My Live Location:
+${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location Unavailable'}
+
+Sent automatically via Rakshak AI Safety App.`
+
+    // Trigger direct Native WhatsApp App on Mobile
+    triggerDirectWhatsApp(targetPhone, msg)
+  }
+
   const handleSafe = () => {
     clearInterval(countdownIntervalRef.current)
     setCountdown(null)
-    setAutoDispatched(false)
     setIsEmergency(false)
     setEmergencyType(null)
     setFirstAid(null)
@@ -225,7 +230,7 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
       }`}
     >
       <div className='relative w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl'>
-        {/* Settings button */}
+        {/* Contacts Gear Button */}
         {!isEmergency && (
           <button
             onClick={() => setShowSettings(true)}
@@ -235,7 +240,6 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
           </button>
         )}
 
-        {/* Shield Icon */}
         <div
           className={`mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full ${
             isEmergency ? 'bg-red-100' : 'bg-green-100'
@@ -249,13 +253,13 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
         {!isEmergency && (
           <div className='inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-800 mb-4'>
             <span className='h-2 w-2 rounded-full bg-green-500 animate-ping'></span>
-            Autonomous Fall & Crash Guard Active
+            24/7 Auto Fall & Crash Guard Active
           </div>
         )}
 
         <p className='mb-4 text-gray-600'>{status}</p>
 
-        {/* Autonomous 10s SOS Countdown Box */}
+        {/* 10s SOS Countdown Box */}
         {isEmergency && (
           <div className='mb-4 rounded-2xl bg-red-100 p-4 text-red-900 animate-pulse border-2 border-red-400'>
             <p className='text-xs font-black uppercase tracking-wider text-red-600'>
@@ -264,19 +268,13 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
             <p className='text-2xl font-black my-1'>
               {countdown !== null && countdown > 0
                 ? `Auto-Dispatch in ${countdown}s`
-                : '✅ SMS & Ambulance Triggered'}
-            </p>
-            <p className='text-xs text-red-700'>
-              {countdown !== null && countdown > 0
-                ? 'Dispatching automated SMS to parents and calling 102...'
-                : 'Alert sent. Help is on the way.'}
+                : '✅ Native WhatsApp & Call Launched'}
             </p>
           </div>
         )}
 
         {!isEmergency ? (
           <div className='space-y-2'>
-            {/* Demo Simulation button */}
             <button
               onClick={() => triggerAutonomousEmergency('ROAD_ACCIDENT')}
               className='w-full rounded-2xl bg-red-600 px-5 py-3.5 font-semibold text-white shadow-lg hover:bg-red-700'
@@ -288,7 +286,7 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
               onClick={() => {
                 isListeningRef.current = true
                 recognitionRef.current?.start()
-                setStatus('🎤 Voice Shield Active - Speak now')
+                setStatus('🎤 Voice Shield Active')
               }}
               className='w-full rounded-2xl bg-black px-5 py-3 font-semibold text-white hover:bg-gray-800'
             >
@@ -318,6 +316,13 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
             </button>
 
             <button
+              onClick={sendGuardianWhatsApp}
+              className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md'
+            >
+              📲 Open WhatsApp Direct
+            </button>
+
+            <button
               onClick={() => {
                 window.location.href = 'tel:102'
               }}
@@ -341,12 +346,6 @@ Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
                 🚓 Find Police
               </button>
             </div>
-
-            {location && (
-              <div className='mt-2 rounded-2xl bg-gray-100 p-2.5 text-center text-xs text-gray-600'>
-                📍 Live Coordinates: {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
-              </div>
-            )}
           </div>
         )}
 
