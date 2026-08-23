@@ -186,7 +186,9 @@ export default function App() {
     const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
     const loc = locationRef.current
 
-    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\n\nI fell down / met with an accident and I am UNRESPONSIVE!\n\n📍 My Live Location:\n${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location Unavailable'}\n\nSent automatically via Rakshak AI Safety App.`
+    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\n\nI met with an accident / fell down and I am UNRESPONSIVE!\n\n📍 My Live Location:\n${
+      loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location Unavailable'
+    }\n\nSent automatically via Rakshak AI Safety App.`
 
     triggerDirectWhatsApp(targetPhone, msg)
   }
@@ -196,19 +198,19 @@ export default function App() {
     const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
     const loc = locationRef.current
 
-    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\nVictim UNRESPONSIVE.\nLocation: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
+    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\nVictim UNRESPONSIVE.\nLocation: ${
+      loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'
+    }`
 
     triggerDirectSMS(targetPhone, msg)
   }
 
   const executeAutonomousDispatch = async (type: EmergencyType) => {
+    // 1. Silent Cloud Alert to backend
     await sendAutoCloudAlert(guardiansRef.current, locationRef.current, type)
-    handleSendWhatsApp()
-    handleSendSMS()
 
-    setTimeout(() => {
-      window.location.href = 'tel:102'
-    }, 2000)
+    // 2. Launch Native WhatsApp cleanly
+    handleSendWhatsApp()
   }
 
   const handleSafe = () => {
@@ -269,7 +271,7 @@ export default function App() {
             <p className='text-2xl font-black my-1'>
               {countdown !== null && countdown > 0
                 ? `Auto-Dispatch in ${countdown}s`
-                : '✅ Emergency Dispatched'}
+                : '✅ Location Ready - Tap Send'}
             </p>
           </div>
         )}
@@ -320,14 +322,14 @@ export default function App() {
               onClick={handleSendWhatsApp}
               className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md text-center'
             >
-              📲 Open Direct WhatsApp App
+              📲 Send via WhatsApp
             </button>
 
             <button
               onClick={handleSendSMS}
               className='w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md text-center'
             >
-              💬 Send Direct Phone SMS
+              💬 Send via Text SMS (Offline)
             </button>
 
             <a
@@ -350,7 +352,7 @@ export default function App() {
               }}
               className='w-full rounded-2xl bg-red-700 px-5 py-3.5 font-semibold text-white hover:bg-red-800 text-center'
             >
-              🚑 Direct Call Ambulance (102)
+              🚑 Call Ambulance (102)
             </button>
 
             <div className='grid grid-cols-2 gap-2'>
