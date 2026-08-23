@@ -13,7 +13,11 @@ import {
 import { getGuardians, saveGuardians } from './utils/guardianStorage'
 import { sendAutoCloudAlert } from './services/smsService'
 import { requestWakeLock, releaseWakeLock } from './utils/wakeLock'
-import { triggerDirectWhatsApp, formatPhoneWithCountryCode } from './utils/whatsapp'
+import {
+  triggerDirectWhatsApp,
+  triggerDirectSMS,
+  formatPhoneWithCountryCode,
+} from './utils/whatsapp'
 import GuardianSettings from './components/GuardianSettings'
 
 export default function App() {
@@ -183,21 +187,21 @@ export default function App() {
 
   // ⚡ AUTO-DISPATCH EXECUTOR
   const executeAutonomousDispatch = async (type: EmergencyType) => {
-    // 1. Send Auto Cloud Notification
+    // 1. Cloud Webhook Alert
     await sendAutoCloudAlert(guardiansRef.current, locationRef.current, type)
 
-    // 2. Launch Native WhatsApp App directly
+    // 2. Direct Native WhatsApp Trigger
     sendGuardianWhatsApp()
 
     // 3. Auto Dial Ambulance (102)
     setTimeout(() => {
       window.location.href = 'tel:102'
-    }, 1500)
+    }, 2000)
   }
 
   const sendGuardianWhatsApp = () => {
     const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
-    const targetPhone = primary?.phone ? formatPhoneWithCountryCode(primary.phone) : '919876543210'
+    const targetPhone = formatPhoneWithCountryCode(primary?.phone || '9905740936')
     const loc = locationRef.current
 
     const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
@@ -209,8 +213,19 @@ ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location Unavailab
 
 Sent automatically via Rakshak AI Safety App.`
 
-    // Trigger direct Native WhatsApp App on Mobile
     triggerDirectWhatsApp(targetPhone, msg)
+  }
+
+  const sendGuardianSMS = () => {
+    const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
+    const targetPhone = formatPhoneWithCountryCode(primary?.phone || '9905740936')
+    const loc = locationRef.current
+
+    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
+Victim is UNRESPONSIVE.
+Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location Unavailable'}`
+
+    triggerDirectSMS(targetPhone, msg)
   }
 
   const handleSafe = () => {
@@ -268,7 +283,7 @@ Sent automatically via Rakshak AI Safety App.`
             <p className='text-2xl font-black my-1'>
               {countdown !== null && countdown > 0
                 ? `Auto-Dispatch in ${countdown}s`
-                : '✅ Native WhatsApp & Call Launched'}
+                : '✅ Native WhatsApp & Call Triggered'}
             </p>
           </div>
         )}
@@ -319,7 +334,14 @@ Sent automatically via Rakshak AI Safety App.`
               onClick={sendGuardianWhatsApp}
               className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md'
             >
-              📲 Open WhatsApp Direct
+              📲 Open Direct WhatsApp
+            </button>
+
+            <button
+              onClick={sendGuardianSMS}
+              className='w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md'
+            >
+              💬 Send Direct Phone SMS
             </button>
 
             <button
