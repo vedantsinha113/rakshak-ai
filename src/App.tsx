@@ -14,10 +14,9 @@ import { getGuardians, saveGuardians } from './utils/guardianStorage'
 import { sendAutoCloudAlert } from './services/smsService'
 import { requestWakeLock, releaseWakeLock } from './utils/wakeLock'
 import {
-  getWhatsAppDeepLink,
-  getSMSDeepLink,
-  formatPhoneWithCountryCode,
   triggerDirectWhatsApp,
+  triggerDirectSMS,
+  formatPhoneWithCountryCode,
 } from './utils/whatsapp'
 import GuardianSettings from './components/GuardianSettings'
 
@@ -188,19 +187,11 @@ export default function App() {
 
   // ⚡ AUTO-DISPATCH EXECUTOR
   const executeAutonomousDispatch = async (type: EmergencyType) => {
-    // 1. Send Auto Cloud Notification
+    // 1. Cloud Webhook Alert
     await sendAutoCloudAlert(guardiansRef.current, locationRef.current, type)
 
-    // 2. Direct Native WhatsApp Trigger
-    const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
-    const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
-    const loc = locationRef.current
-
-    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
-I met with an accident and I am UNRESPONSIVE!
-📍 Live Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
-
-    triggerDirectWhatsApp(targetPhone, msg)
+    // 2. Direct Android Intent WhatsApp Launch
+    sendGuardianWhatsApp()
 
     // 3. Auto Dial Ambulance (102)
     setTimeout(() => {
@@ -208,13 +199,12 @@ I met with an accident and I am UNRESPONSIVE!
     }, 2000)
   }
 
-  const getPrimaryGuardian = () => {
-    return guardians.find((g) => g.isPrimary) || guardians[0]
-  }
-
-  const getEmergencyMessage = () => {
+  const sendGuardianWhatsApp = () => {
+    const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
+    const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
     const loc = locationRef.current
-    return `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
+
+    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
 
 I fell down / met with an accident and I am UNRESPONSIVE!
 
@@ -222,6 +212,20 @@ I fell down / met with an accident and I am UNRESPONSIVE!
 ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location Unavailable'}
 
 Sent automatically via Rakshak AI Safety App.`
+
+    triggerDirectWhatsApp(targetPhone, msg)
+  }
+
+  const sendGuardianSMS = () => {
+    const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
+    const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
+    const loc = locationRef.current
+
+    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
+Victim UNRESPONSIVE.
+Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
+
+    triggerDirectSMS(targetPhone, msg)
   }
 
   const handleSafe = () => {
@@ -233,9 +237,6 @@ Sent automatically via Rakshak AI Safety App.`
     setStatus('🛡️ Rakshak 24/7 Shield Active')
     cancelEmergency()
   }
-
-  const primaryContact = getPrimaryGuardian()
-  const emergencyMsg = getEmergencyMessage()
 
   return (
     <div
@@ -282,7 +283,7 @@ Sent automatically via Rakshak AI Safety App.`
             <p className='text-2xl font-black my-1'>
               {countdown !== null && countdown > 0
                 ? `Auto-Dispatch in ${countdown}s`
-                : '✅ Native SOS Dispatched'}
+                : '✅ Emergency Protocols Triggered'}
             </p>
           </div>
         )}
@@ -329,27 +330,30 @@ Sent automatically via Rakshak AI Safety App.`
               ✅ I Am Safe (Abort Emergency)
             </button>
 
-            {/* DIRECT NATIVE ANCHOR LINK (NO WEB REDIRECT!) */}
-            <a
-              href={getWhatsAppDeepLink(primaryContact?.phone || '', emergencyMsg)}
-              className='block w-full text-center rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md'
+            {/* Direct Android Native Intent Trigger */}
+            <button
+              onClick={sendGuardianWhatsApp}
+              className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md text-center'
             >
-              📲 Open WhatsApp Direct
-            </a>
+              📲 Open Direct WhatsApp App
+            </button>
 
-            <a
-              href={getSMSDeepLink(primaryContact?.phone || '', emergencyMsg)}
-              className='block w-full text-center rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md'
+            {/* Direct SMS Fallback (ZERO WEB PAGES!) */}
+            <button
+              onClick={sendGuardianSMS}
+              className='w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md text-center'
             >
-              💬 Send Phone SMS
-            </a>
+              💬 Send Direct Phone SMS (Instant)
+            </button>
 
-            <a
-              href='tel:102'
-              className='block w-full text-center rounded-2xl bg-red-700 px-5 py-3.5 font-semibold text-white hover:bg-red-800 shadow-md'
+            <button
+              onClick={() => {
+                window.location.href = 'tel:102'
+              }}
+              className='w-full rounded-2xl bg-red-700 px-5 py-3.5 font-semibold text-white hover:bg-red-800 text-center'
             >
               🚑 Direct Call Ambulance (102)
-            </a>
+            </button>
 
             <div className='grid grid-cols-2 gap-2'>
               <button
@@ -380,4 +384,4 @@ Sent automatically via Rakshak AI Safety App.`
       </div>
     </div>
   )
-} 
+}

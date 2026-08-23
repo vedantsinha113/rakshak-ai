@@ -1,9 +1,8 @@
-// Strictly clean phone number (ONLY numbers, no +, no spaces)
+// Clean phone number and ensure country code (+91)
 export function formatPhoneWithCountryCode(phone: string): string {
   if (!phone) return '919876543210'
   let clean = phone.replace(/[^0-9]/g, '')
 
-  // Force 91 prefix if 10-digit Indian number
   if (clean.length === 10) {
     clean = '91' + clean
   }
@@ -11,21 +10,27 @@ export function formatPhoneWithCountryCode(phone: string): string {
   return clean
 }
 
-// DIRECT NATIVE APP SCHEME (Bypasses api.whatsapp.com web page completely!)
-export function getWhatsAppDeepLink(phone: string, text: string): string {
-  const cleanPhone = formatPhoneWithCountryCode(phone)
-  const encodedText = encodeURIComponent(text)
-  return `whatsapp://send?phone=${cleanPhone}&text=${encodedText}`
-}
-
-// DIRECT SMS SCHEME (Works offline)
-export function getSMSDeepLink(phone: string, text: string): string {
-  const cleanPhone = formatPhoneWithCountryCode(phone)
-  const encodedText = encodeURIComponent(text)
-  return `sms:+${cleanPhone}?body=${encodedText}`
-}
-
+// Android Kernel Intent (Forces Android to bypass Chrome Web Redirect & open WhatsApp directly)
 export function triggerDirectWhatsApp(phone: string, text: string) {
-  const link = getWhatsAppDeepLink(phone, text)
-  window.location.href = link
+  const cleanPhone = formatPhoneWithCountryCode(phone)
+  const encodedText = encodeURIComponent(text)
+
+  // Official Android Package Intent
+  const androidIntent = `intent://send?phone=${cleanPhone}&text=${encodedText}#Intent;scheme=whatsapp;package=com.whatsapp;end`
+  const fallbackScheme = `whatsapp://send?phone=${cleanPhone}&text=${encodedText}`
+
+  const isAndroid = /Android/i.test(navigator.userAgent)
+
+  if (isAndroid) {
+    window.location.href = androidIntent
+  } else {
+    window.location.href = fallbackScheme
+  }
+}
+
+// Direct Native SMS Trigger (Works 100% Offline, ZERO Web Pages!)
+export function triggerDirectSMS(phone: string, text: string) {
+  const cleanPhone = formatPhoneWithCountryCode(phone)
+  const encodedText = encodeURIComponent(text)
+  window.location.href = `sms:+${cleanPhone}?body=${encodedText}`
 }
