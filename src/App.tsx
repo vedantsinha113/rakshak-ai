@@ -213,7 +213,7 @@ export default function App() {
     await sendAutoCloudAlert(guardiansRef.current, loc, type)
 
     // 3. WhatsApp as manual backup
-    handleSendWhatsApp()
+   // handleSendWhatsApp()
   }
 
   const handleSendWhatsApp = () => {
@@ -380,7 +380,7 @@ export default function App() {
               ✅ I Am Safe (Abort Emergency)
             </button>
 
-            <button
+            {/*<button
               onClick={handleSendWhatsApp}
               className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md text-center'
             >
@@ -392,7 +392,7 @@ export default function App() {
               className='w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md text-center'
             >
               💬 Backup: Send via SMS
-            </button>
+            </button>*/}
 
             {/* Hidden anchors for deep link backup */}
             <a
