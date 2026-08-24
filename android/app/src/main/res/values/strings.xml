@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Rakshak AI</string>
+    <string name="title_activity_main">Rakshak AI</string>
+    <string name="package_name">com.rakshak.ai</string>
+    <string name="custom_url_scheme">com.rakshak.ai</string>
+</resources>
