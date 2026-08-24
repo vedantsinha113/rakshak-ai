@@ -20,6 +20,10 @@ import {
   getWhatsAppDeepLink,
   getSMSDeepLink,
 } from './utils/whatsapp'
+import {
+  sendTelegramAlert,
+  sendTelegramLocationAlert,
+} from './services/telegramService'
 import GuardianSettings from './components/GuardianSettings'
 
 export default function App() {
@@ -28,6 +32,7 @@ export default function App() {
   const [firstAid, setFirstAid] = useState<FirstAidResponse | null>(null)
   const [status, setStatus] = useState('🛡️ Rakshak 24/7 Shield Active')
   const [location, setLocation] = useState<Location | null>(null)
+  const [telegramSent, setTelegramSent] = useState(false)
 
   const [guardians, setGuardians] = useState<Guardian[]>(getGuardians())
   const [showSettings, setShowSettings] = useState(false)
@@ -64,7 +69,10 @@ export default function App() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+          setLocation({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          })
         },
         () => console.log('Location denied')
       )
@@ -121,8 +129,11 @@ export default function App() {
     }
   }, [])
 
+  // 📳 Always-On Fall Detection Sensor
   useEffect(() => {
-    let lastX = 0, lastY = 0, lastZ = 0
+    let lastX = 0,
+      lastY = 0,
+      lastZ = 0
     let lastUpdate = 0
 
     const handleMotion = (event: DeviceMotionEvent) => {
@@ -140,7 +151,8 @@ export default function App() {
         const y = acc.y || 0
         const z = acc.z || 0
 
-        const speed = Math.abs(x + y + z - lastX - lastY - lastZ) / diffTime * 10000
+        const speed =
+          (Math.abs(x + y + z - lastX - lastY - lastZ) / diffTime) * 10000
 
         if (speed > 1600 && !isEmergencyRef.current) {
           triggerAutonomousEmergency('ROAD_ACCIDENT')
@@ -161,7 +173,8 @@ export default function App() {
   const triggerAutonomousEmergency = async (type: EmergencyType) => {
     setIsEmergency(true)
     setCurrentEmergencyType(type)
-    setStatus(`⚠️ CRITICAL EMERGENCY DETECTED`)
+    setTelegramSent(false)
+    setStatus('⚠️ CRITICAL EMERGENCY DETECTED')
 
     const aid = await startEmergency(type, locationRef.current)
     setFirstAid(aid || getFirstAid(type))
@@ -181,41 +194,68 @@ export default function App() {
     }, 1000)
   }
 
+  // ⚡ Zero-Click Auto Dispatch
+  const executeAutonomousDispatch = async (type: EmergencyType) => {
+    const loc = locationRef.current
+
+    // 1. ✅ Telegram Auto Alert (ZERO CLICK - Fully Automatic!)
+    let sent = false
+    if (loc) {
+      sent = await sendTelegramLocationAlert(loc.lat, loc.lng, type)
+    } else {
+      sent = await sendTelegramAlert(
+        `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\n\nEmergency: ${type}\nLocation: Unavailable`
+      )
+    }
+    setTelegramSent(sent)
+
+    // 2. Cloud Webhook backup
+    await sendAutoCloudAlert(guardiansRef.current, loc, type)
+
+    // 3. WhatsApp as manual backup
+    handleSendWhatsApp()
+  }
+
   const handleSendWhatsApp = () => {
-    const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
-    const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
+    const primary =
+      guardiansRef.current.find((g) => g.isPrimary) ||
+      guardiansRef.current[0]
+    const targetPhone = formatPhoneWithCountryCode(
+      primary?.phone || '919876543210'
+    )
     const loc = locationRef.current
 
     const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\n\nI met with an accident / fell down and I am UNRESPONSIVE!\n\n📍 My Live Location:\n${
-      loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'Location Unavailable'
+      loc
+        ? `https://maps.google.com/?q=${loc.lat},${loc.lng}`
+        : 'Location Unavailable'
     }\n\nSent automatically via Rakshak AI Safety App.`
 
     triggerDirectWhatsApp(targetPhone, msg)
   }
 
   const handleSendSMS = () => {
-    const primary = guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
-    const targetPhone = formatPhoneWithCountryCode(primary?.phone || '919876543210')
+    const primary =
+      guardiansRef.current.find((g) => g.isPrimary) ||
+      guardiansRef.current[0]
+    const targetPhone = formatPhoneWithCountryCode(
+      primary?.phone || '919876543210'
+    )
     const loc = locationRef.current
 
     const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\nVictim UNRESPONSIVE.\nLocation: ${
-      loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'
+      loc
+        ? `https://maps.google.com/?q=${loc.lat},${loc.lng}`
+        : 'N/A'
     }`
 
     triggerDirectSMS(targetPhone, msg)
   }
 
-  const executeAutonomousDispatch = async (type: EmergencyType) => {
-    // 1. Silent Cloud Alert to backend
-    await sendAutoCloudAlert(guardiansRef.current, locationRef.current, type)
-
-    // 2. Launch Native WhatsApp cleanly
-    handleSendWhatsApp()
-  }
-
   const handleSafe = () => {
     clearInterval(countdownIntervalRef.current)
     setCountdown(null)
+    setTelegramSent(false)
     setIsEmergency(false)
     setCurrentEmergencyType(null)
     setFirstAid(null)
@@ -223,9 +263,12 @@ export default function App() {
     cancelEmergency()
   }
 
-  const primaryContact = guardians.find((g) => g.isPrimary) || guardians[0]
+  const primaryContact =
+    guardians.find((g) => g.isPrimary) || guardians[0]
   const emergencyMsg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\nVictim UNRESPONSIVE!\nLocation: ${
-    location ? `https://maps.google.com/?q=${location.lat},${location.lng}` : 'Unavailable'
+    location
+      ? `https://maps.google.com/?q=${location.lat},${location.lng}`
+      : 'Unavailable'
   }`
 
   return (
@@ -252,7 +295,9 @@ export default function App() {
           <span className='text-4xl'>{isEmergency ? '🚨' : '🛡️'}</span>
         </div>
 
-        <h1 className='mb-2 text-3xl font-bold text-gray-900'>Rakshak AI</h1>
+        <h1 className='mb-2 text-3xl font-bold text-gray-900'>
+          Rakshak AI
+        </h1>
 
         {!isEmergency && (
           <div className='inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-800 mb-4'>
@@ -263,16 +308,33 @@ export default function App() {
 
         <p className='mb-4 text-gray-600'>{status}</p>
 
+        {/* 10s Countdown */}
         {isEmergency && (
           <div className='mb-4 rounded-2xl bg-red-100 p-4 text-red-900 animate-pulse border-2 border-red-400'>
             <p className='text-xs font-black uppercase tracking-wider text-red-600'>
-              AUTOMATIC EMERGENCY PROTOCOL ({currentEmergencyType?.replace(/_/g, ' ') || 'TRAUMA'})
+              AUTOMATIC EMERGENCY PROTOCOL (
+              {currentEmergencyType?.replace(/_/g, ' ') || 'TRAUMA'})
             </p>
             <p className='text-2xl font-black my-1'>
               {countdown !== null && countdown > 0
                 ? `Auto-Dispatch in ${countdown}s`
-                : '✅ Location Ready - Tap Send'}
+                : '✅ Emergency Dispatched'}
             </p>
+
+            {/* Telegram Status Badge */}
+            {countdown === 0 && (
+              <div
+                className={`mt-2 rounded-xl px-3 py-1 text-xs font-bold ${
+                  telegramSent
+                    ? 'bg-green-200 text-green-800'
+                    : 'bg-yellow-200 text-yellow-800'
+                }`}
+              >
+                {telegramSent
+                  ? '✅ Telegram Alert Sent to Guardian!'
+                  : '⚠️ Telegram Alert Failed - Use WhatsApp Below'}
+              </div>
+            )}
           </div>
         )}
 
@@ -322,28 +384,34 @@ export default function App() {
               onClick={handleSendWhatsApp}
               className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md text-center'
             >
-              📲 Send via WhatsApp
+              📲 Backup: Send via WhatsApp
             </button>
 
             <button
               onClick={handleSendSMS}
               className='w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md text-center'
             >
-              💬 Send via Text SMS (Offline)
+              💬 Backup: Send via SMS
             </button>
 
+            {/* Hidden anchors for deep link backup */}
             <a
-              href={getWhatsAppDeepLink(primaryContact?.phone || '', emergencyMsg)}
+              href={getWhatsAppDeepLink(
+                primaryContact?.phone || '',
+                emergencyMsg
+              )}
               className='hidden'
             >
-              WhatsApp Backup
+              wa
             </a>
-
             <a
-              href={getSMSDeepLink(primaryContact?.phone || '', emergencyMsg)}
+              href={getSMSDeepLink(
+                primaryContact?.phone || '',
+                emergencyMsg
+              )}
               className='hidden'
             >
-              SMS Backup
+              sms
             </a>
 
             <button
