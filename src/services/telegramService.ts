@@ -1,36 +1,23 @@
-// 🔐 Apna Bot Token aur Chat ID yahan daalo
-const TELEGRAM_BOT_TOKEN = '8875330643:AAFDhOedVfIXBOmJOBceHg_7uUCGYQIJufw'
-const TELEGRAM_CHAT_ID = '5688832303'
+import { getTelegramConfig } from '../utils/telegramStorage'
 
-export async function sendTelegramAlert(
-  message: string
-): Promise<boolean> {
+export async function sendTelegramAlert(message: string): Promise<boolean> {
+  const { token, chatId } = getTelegramConfig()
+  if (!token || !chatId) return false
+
   try {
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`
-
+    const url = `https://api.telegram.org/bot${token}/sendMessage`
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
+        chat_id: chatId,
         text: message,
         parse_mode: 'HTML',
       }),
     })
-
     const data = await response.json()
-
-    if (data.ok) {
-      console.log('✅ Telegram alert sent successfully!')
-      return true
-    } else {
-      console.error('Telegram error:', data)
-      return false
-    }
-  } catch (error) {
-    console.error('Telegram dispatch failed:', error)
+    return data.ok
+  } catch {
     return false
   }
 }
@@ -40,46 +27,72 @@ export async function sendTelegramLocationAlert(
   lng: number,
   emergencyType: string
 ): Promise<boolean> {
+  const { token, chatId } = getTelegramConfig()
+  if (!token || !chatId) return false
+
   try {
-    // 1. Send Text Message
-    const textUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`
+    const textUrl = `https://api.telegram.org/bot${token}/sendMessage`
     await fetch(textUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
+        chat_id: chatId,
         text: `🚨 <b>EMERGENCY ALERT - RAKSHAK AI</b>
 
-⚠️ Emergency Type: <b>${emergencyType.replace(/_/g, ' ')}</b>
-
+⚠️ Emergency: <b>${emergencyType.replace(/_/g, ' ')}</b>
 🆘 Victim is <b>UNRESPONSIVE</b>
-
-📍 <b>Live GPS Location:</b>
-https://maps.google.com/?q=${lat},${lng}
-
+📍 Live GPS: https://maps.google.com/?q=${lat},${lng}
 🕒 Time: ${new Date().toLocaleString('en-IN')}
 
-<i>Sent automatically via Rakshak AI Safety System</i>`,
+<i>Sent automatically via Rakshak AI</i>`,
         parse_mode: 'HTML',
       }),
     })
 
-    // 2. Send Location Pin (Map Preview in Telegram!)
-    const locationUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendLocation`
+    const locationUrl = `https://api.telegram.org/bot${token}/sendLocation`
     await fetch(locationUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
+        chat_id: chatId,
         latitude: lat,
         longitude: lng,
       }),
     })
 
-    console.log('✅ Telegram location alert sent!')
     return true
-  } catch (error) {
-    console.error('Telegram location failed:', error)
+  } catch {
+    return false
+  }
+}
+
+export async function testTelegramConnection(): Promise<boolean> {
+  const { token, chatId } = getTelegramConfig()
+  if (!token || !chatId) return false
+
+  try {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `✅ <b>Rakshak AI Connected!</b>
+
+🛡️ Your Telegram is now linked to Rakshak AI Safety System.
+
+In case of emergency, you will receive:
+• 🚨 Emergency Alert Message
+• 📍 Live GPS Location Pin
+• 🕒 Exact Time of Incident
+
+Stay Safe! 🙏`,
+        parse_mode: 'HTML',
+      }),
+    })
+    const data = await response.json()
+    return data.ok
+  } catch {
     return false
   }
 }
