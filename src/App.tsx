@@ -17,8 +17,6 @@ import {
   triggerDirectWhatsApp,
   triggerDirectSMS,
   formatPhoneWithCountryCode,
-  getWhatsAppDeepLink,
-  getSMSDeepLink,
 } from './utils/whatsapp'
 import {
   sendTelegramAlert,
@@ -28,108 +26,129 @@ import GuardianSettings from './components/GuardianSettings'
 
 export default function App() {
   const [isEmergency, setIsEmergency] = useState(false)
-  const [currentEmergencyType, setCurrentEmergencyType] = useState<EmergencyType | null>(null)
+  const [currentEmergencyType, setCurrentEmergencyType] =
+    useState<EmergencyType | null>(null)
   const [firstAid, setFirstAid] = useState<FirstAidResponse | null>(null)
   const [status, setStatus] = useState('🛡️ Rakshak 24/7 Shield Active')
   const [location, setLocation] = useState<Location | null>(null)
-  const [telegramSent, setTelegramSent] = useState(false)
+
+  const [telegramSent, setTelegramSent] = useState<boolean | null>(null)
 
   const [guardians, setGuardians] = useState<Guardian[]>(getGuardians())
   const [showSettings, setShowSettings] = useState(false)
 
   const [countdown, setCountdown] = useState<number | null>(null)
-  const countdownIntervalRef = useRef<any>(null)
+  const countdownIntervalRef = useRef<number | null>(null)
 
   const recognitionRef = useRef<any>(null)
   const locationRef = useRef<Location | null>(null)
+  const guardiansRef = useRef<Guardian[]>(guardians)
   const isListeningRef = useRef(false)
   const isEmergencyRef = useRef(false)
-  const guardiansRef = useRef<Guardian[]>(guardians)
+  const hasDispatchedRef = useRef(false)
 
   useEffect(() => {
     locationRef.current = location
   }, [location])
 
   useEffect(() => {
-    isEmergencyRef.current = isEmergency
-  }, [isEmergency])
-
-  useEffect(() => {
     guardiansRef.current = guardians
   }, [guardians])
+
+  useEffect(() => {
+    isEmergencyRef.current = isEmergency
+  }, [isEmergency])
 
   const handleGuardiansUpdate = (updated: Guardian[]) => {
     setGuardians(updated)
     saveGuardians(updated)
   }
 
+  // Setup: WakeLock + Location + SpeechRecognition (voice guard)
   useEffect(() => {
     requestWakeLock()
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          setLocation({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          })
+          setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
         },
         () => console.log('Location denied')
       )
     }
 
     const SpeechRecognition =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
 
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition()
-      recognitionRef.current = recognition
-      recognition.continuous = true
-      recognition.interimResults = false
-      recognition.lang = 'en-IN'
+    if (!SpeechRecognition) {
+      setStatus('Speech recognition not supported')
+      return () => {
+        releaseWakeLock()
+      }
+    }
 
-      recognition.onresult = async (event: any) => {
-        const transcript =
-          event.results[event.results.length - 1][0].transcript
-            .toLowerCase()
-            .trim()
+    const recognition = new SpeechRecognition()
+    recognitionRef.current = recognition
+    recognition.continuous = true
+    recognition.interimResults = false
+    recognition.lang = 'en-IN'
 
-        console.log('Heard:', transcript)
-        const command = parseCommand(transcript)
+    recognition.onresult = async (event: any) => {
+      const transcript =
+        event.results[event.results.length - 1][0].transcript
+          .toLowerCase()
+          .trim()
 
-        if (command === 'SAFE') {
-          handleSafe()
-          return
-        }
+      console.log('Heard:', transcript)
+      const command = parseCommand(transcript)
 
-        if (command === 'EMERGENCY') {
-          const type = detectEmergencyType(transcript)
-          triggerAutonomousEmergency(type)
-          return
-        }
+      if (command === 'SAFE') {
+        handleSafe()
+        return
       }
 
-      recognition.onerror = (e: any) => {
-        if (e.error !== 'no-speech') setStatus('🛡️ Shield Active')
+      if (command === 'EMERGENCY') {
+        const type = detectEmergencyType(transcript)
+        triggerEmergency(type, 'VOICE')
+        return
       }
 
-      recognition.onend = () => {
-        if (isListeningRef.current) {
-          try {
-            recognition.start()
-          } catch {}
-        }
+      if (command === 'HOSPITAL') {
+        hospital(locationRef.current)
+        return
+      }
+
+      if (command === 'POLICE') {
+        police(locationRef.current)
+        return
+      }
+    }
+
+    recognition.onerror = () => {
+      // keep silent
+    }
+
+    recognition.onend = () => {
+      if (isListeningRef.current) {
+        try {
+          recognition.start()
+        } catch {}
       }
     }
 
     return () => {
       releaseWakeLock()
-      clearInterval(countdownIntervalRef.current)
+      if (countdownIntervalRef.current) {
+        window.clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
+      try {
+        recognition.stop()
+      } catch {}
     }
   }, [])
 
-  // 📳 Always-On Fall Detection Sensor
+  // Always-on fall/crash detection (DeviceMotion)
   useEffect(() => {
     let lastX = 0,
       lastY = 0,
@@ -154,8 +173,9 @@ export default function App() {
         const speed =
           (Math.abs(x + y + z - lastX - lastY - lastZ) / diffTime) * 10000
 
+        // threshold tweakable
         if (speed > 1600 && !isEmergencyRef.current) {
-          triggerAutonomousEmergency('ROAD_ACCIDENT')
+          triggerEmergency('ROAD_ACCIDENT', 'FALL_SENSOR')
         }
 
         lastX = x
@@ -165,28 +185,38 @@ export default function App() {
     }
 
     window.addEventListener('devicemotion', handleMotion)
-    return () => {
-      window.removeEventListener('devicemotion', handleMotion)
-    }
+    return () => window.removeEventListener('devicemotion', handleMotion)
   }, [])
 
-  const triggerAutonomousEmergency = async (type: EmergencyType) => {
+  const triggerEmergency = async (type: EmergencyType, source: string) => {
+    if (isEmergencyRef.current) return
+
+    hasDispatchedRef.current = false
+    setTelegramSent(null)
+
     setIsEmergency(true)
     setCurrentEmergencyType(type)
-    setTelegramSent(false)
-    setStatus('⚠️ CRITICAL EMERGENCY DETECTED')
+    setStatus(`⚠️ EMERGENCY DETECTED (${source})`)
 
     const aid = await startEmergency(type, locationRef.current)
     setFirstAid(aid || getFirstAid(type))
 
+    // countdown
     setCountdown(10)
-    clearInterval(countdownIntervalRef.current)
+    if (countdownIntervalRef.current) {
+      window.clearInterval(countdownIntervalRef.current)
+      countdownIntervalRef.current = null
+    }
 
-    countdownIntervalRef.current = setInterval(() => {
+    countdownIntervalRef.current = window.setInterval(() => {
       setCountdown((prev) => {
-        if (prev === null || prev <= 1) {
-          clearInterval(countdownIntervalRef.current)
-          executeAutonomousDispatch(type)
+        if (prev === null) return prev
+        if (prev <= 1) {
+          if (countdownIntervalRef.current) {
+            window.clearInterval(countdownIntervalRef.current)
+            countdownIntervalRef.current = null
+          }
+          void executeAutonomousDispatch(type)
           return 0
         }
         return prev - 1
@@ -194,68 +224,82 @@ export default function App() {
     }, 1000)
   }
 
-  // ⚡ Zero-Click Auto Dispatch
   const executeAutonomousDispatch = async (type: EmergencyType) => {
+    if (hasDispatchedRef.current) return
+    hasDispatchedRef.current = true
+
     const loc = locationRef.current
 
-    // 1. ✅ Telegram Auto Alert (ZERO CLICK - Fully Automatic!)
-    let sent = false
-    if (loc) {
-      sent = await sendTelegramLocationAlert(loc.lat, loc.lng, type)
-    } else {
-      sent = await sendTelegramAlert(
-        `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\n\nEmergency: ${type}\nLocation: Unavailable`
-      )
+    // 1) Telegram (AUTO SEND - zero click)
+    try {
+      let ok = false
+      if (loc) ok = await sendTelegramLocationAlert(loc.lat, loc.lng, type)
+      else
+        ok = await sendTelegramAlert(
+          `🚨 EMERGENCY ALERT - RAKSHAK AI\n\nType: ${type}\nLocation: Unavailable`
+        )
+      setTelegramSent(ok)
+    } catch {
+      setTelegramSent(false)
     }
-    setTelegramSent(sent)
 
-    // 2. Cloud Webhook backup
-    await sendAutoCloudAlert(guardiansRef.current, loc, type)
+    // 2) Cloud webhook backup (optional)
+    try {
+      await sendAutoCloudAlert(guardiansRef.current, loc, type)
+    } catch {}
 
-    // 3. WhatsApp as manual backup
-   // handleSendWhatsApp()
+    // 3) WhatsApp/SMS intentionally OFF (feature flag in utils/whatsapp.ts)
+    // (Kept for future, but not triggered now)
+    // handleSendWhatsApp()
+    // handleSendSMS()
+
+    // 4) Optional: open dialer (not auto-sending call; user will tap)
+    setStatus('✅ Telegram alert sent (if configured). Tap call if needed.')
   }
 
+  // Kept for future use (WhatsApp disabled via feature flag)
   const handleSendWhatsApp = () => {
     const primary =
-      guardiansRef.current.find((g) => g.isPrimary) ||
-      guardiansRef.current[0]
-    const targetPhone = formatPhoneWithCountryCode(
-      primary?.phone || '919876543210'
-    )
+      guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
+    const targetPhone = formatPhoneWithCountryCode(primary?.phone || '')
     const loc = locationRef.current
 
-    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\n\nI met with an accident / fell down and I am UNRESPONSIVE!\n\n📍 My Live Location:\n${
-      loc
-        ? `https://maps.google.com/?q=${loc.lat},${loc.lng}`
-        : 'Location Unavailable'
-    }\n\nSent automatically via Rakshak AI Safety App.`
+    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!
 
+Victim may be unresponsive.
+
+📍 Live Location:
+${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
     triggerDirectWhatsApp(targetPhone, msg)
   }
 
+  // Kept for future use (SMS)
   const handleSendSMS = () => {
     const primary =
-      guardiansRef.current.find((g) => g.isPrimary) ||
-      guardiansRef.current[0]
-    const targetPhone = formatPhoneWithCountryCode(
-      primary?.phone || '919876543210'
-    )
+      guardiansRef.current.find((g) => g.isPrimary) || guardiansRef.current[0]
+    const targetPhone = formatPhoneWithCountryCode(primary?.phone || '')
     const loc = locationRef.current
 
-    const msg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\nVictim UNRESPONSIVE.\nLocation: ${
-      loc
-        ? `https://maps.google.com/?q=${loc.lat},${loc.lng}`
-        : 'N/A'
-    }`
-
+    const msg = `🚨 RAKSHAK AI EMERGENCY!
+Location: ${loc ? `https://maps.google.com/?q=${loc.lat},${loc.lng}` : 'N/A'}`
     triggerDirectSMS(targetPhone, msg)
   }
 
+  // Prevent TS6133 unused errors (we keep them for future)
+  void handleSendWhatsApp
+  void handleSendSMS
+
   const handleSafe = () => {
-    clearInterval(countdownIntervalRef.current)
+    isListeningRef.current = false
+    hasDispatchedRef.current = false
+
+    if (countdownIntervalRef.current) {
+      window.clearInterval(countdownIntervalRef.current)
+      countdownIntervalRef.current = null
+    }
+
     setCountdown(null)
-    setTelegramSent(false)
+    setTelegramSent(null)
     setIsEmergency(false)
     setCurrentEmergencyType(null)
     setFirstAid(null)
@@ -263,13 +307,15 @@ export default function App() {
     cancelEmergency()
   }
 
-  const primaryContact =
-    guardians.find((g) => g.isPrimary) || guardians[0]
-  const emergencyMsg = `🚨 EMERGENCY ALERT FROM RAKSHAK AI!\nVictim UNRESPONSIVE!\nLocation: ${
-    location
-      ? `https://maps.google.com/?q=${location.lat},${location.lng}`
-      : 'Unavailable'
-  }`
+  const activateVoiceGuard = () => {
+    try {
+      isListeningRef.current = true
+      recognitionRef.current?.start()
+      setStatus('🎤 Voice Guard Active (Speak)')
+    } catch {
+      setStatus('🎤 Voice Guard already active')
+    }
+  }
 
   return (
     <div
@@ -295,44 +341,43 @@ export default function App() {
           <span className='text-4xl'>{isEmergency ? '🚨' : '🛡️'}</span>
         </div>
 
-        <h1 className='mb-2 text-3xl font-bold text-gray-900'>
-          Rakshak AI
-        </h1>
+        <h1 className='mb-2 text-3xl font-bold text-gray-900'>Rakshak AI</h1>
 
         {!isEmergency && (
           <div className='inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-800 mb-4'>
             <span className='h-2 w-2 rounded-full bg-green-500 animate-ping'></span>
-            24/7 Auto Fall & Crash Guard Active
+            Auto Fall & Crash Guard Active
           </div>
         )}
 
         <p className='mb-4 text-gray-600'>{status}</p>
 
-        {/* 10s Countdown */}
         {isEmergency && (
-          <div className='mb-4 rounded-2xl bg-red-100 p-4 text-red-900 animate-pulse border-2 border-red-400'>
-            <p className='text-xs font-black uppercase tracking-wider text-red-600'>
-              AUTOMATIC EMERGENCY PROTOCOL (
-              {currentEmergencyType?.replace(/_/g, ' ') || 'TRAUMA'})
+          <div className='mb-4 rounded-2xl bg-red-100 p-4 text-red-900 border-2 border-red-300'>
+            <p className='text-xs font-black uppercase tracking-wider text-red-700'>
+              EMERGENCY PROTOCOL ({currentEmergencyType?.replace(/_/g, ' ')})
             </p>
-            <p className='text-2xl font-black my-1'>
+            <p className='mt-1 text-2xl font-black'>
               {countdown !== null && countdown > 0
                 ? `Auto-Dispatch in ${countdown}s`
-                : '✅ Emergency Dispatched'}
+                : 'Dispatch complete'}
             </p>
 
-            {/* Telegram Status Badge */}
             {countdown === 0 && (
               <div
                 className={`mt-2 rounded-xl px-3 py-1 text-xs font-bold ${
-                  telegramSent
-                    ? 'bg-green-200 text-green-800'
-                    : 'bg-yellow-200 text-yellow-800'
+                  telegramSent === true
+                    ? 'bg-green-200 text-green-900'
+                    : telegramSent === false
+                      ? 'bg-yellow-200 text-yellow-900'
+                      : 'bg-gray-200 text-gray-800'
                 }`}
               >
-                {telegramSent
-                  ? '✅ Telegram Alert Sent to Guardian!'
-                  : '⚠️ Telegram Alert Failed - Use WhatsApp Below'}
+                {telegramSent === true
+                  ? '✅ Telegram auto alert SENT'
+                  : telegramSent === false
+                    ? '⚠️ Telegram FAILED (check Token/Chat ID in settings)'
+                    : '...'}
               </div>
             )}
           </div>
@@ -341,18 +386,14 @@ export default function App() {
         {!isEmergency ? (
           <div className='space-y-2'>
             <button
-              onClick={() => triggerAutonomousEmergency('ROAD_ACCIDENT')}
+              onClick={() => triggerEmergency('ROAD_ACCIDENT', 'DEMO')}
               className='w-full rounded-2xl bg-red-600 px-5 py-3.5 font-semibold text-white shadow-lg hover:bg-red-700'
             >
-              🚨 Simulate Crash / Drop (Auto Demo)
+              🚨 Simulate Crash / Drop (Demo)
             </button>
 
             <button
-              onClick={() => {
-                isListeningRef.current = true
-                recognitionRef.current?.start()
-                setStatus('🎤 Voice Shield Active')
-              }}
+              onClick={activateVoiceGuard}
               className='w-full rounded-2xl bg-black px-5 py-3 font-semibold text-white hover:bg-gray-800'
             >
               🎤 Activate Voice Guard
@@ -377,42 +418,8 @@ export default function App() {
               onClick={handleSafe}
               className='w-full rounded-2xl bg-blue-600 px-5 py-3.5 font-semibold text-white hover:bg-blue-700 shadow-md'
             >
-              ✅ I Am Safe (Abort Emergency)
+              ✅ I Am Safe (Abort)
             </button>
-
-            {/*<button
-              onClick={handleSendWhatsApp}
-              className='w-full rounded-2xl bg-green-600 px-5 py-3.5 font-semibold text-white hover:bg-green-700 shadow-md text-center'
-            >
-              📲 Backup: Send via WhatsApp
-            </button>
-
-            <button
-              onClick={handleSendSMS}
-              className='w-full rounded-2xl bg-purple-600 px-5 py-3.5 font-semibold text-white hover:bg-purple-700 shadow-md text-center'
-            >
-              💬 Backup: Send via SMS
-            </button>*/}
-
-            {/* Hidden anchors for deep link backup */}
-            <a
-              href={getWhatsAppDeepLink(
-                primaryContact?.phone || '',
-                emergencyMsg
-              )}
-              className='hidden'
-            >
-              wa
-            </a>
-            <a
-              href={getSMSDeepLink(
-                primaryContact?.phone || '',
-                emergencyMsg
-              )}
-              className='hidden'
-            >
-              sms
-            </a>
 
             <button
               onClick={() => {
@@ -438,6 +445,12 @@ export default function App() {
                 🚓 Find Police
               </button>
             </div>
+
+            {location && (
+              <div className='mt-2 rounded-2xl bg-gray-100 p-2.5 text-center text-xs text-gray-600'>
+                📍 GPS: {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
+              </div>
+            )}
           </div>
         )}
 
