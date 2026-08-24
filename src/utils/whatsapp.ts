@@ -1,7 +1,9 @@
+const WHATSAPP_ENABLED = false
+
 // Strictly formats any phone number to 91XXXXXXXXXX format required by WhatsApp
 export function formatPhoneWithCountryCode(phone: string): string {
   if (!phone) return '919876543210'
-  
+
   // Remove all non-numeric characters (spaces, dashes, +, etc.)
   let digits = phone.replace(/\D/g, '')
 
@@ -28,6 +30,11 @@ export function getSMSDeepLink(phone: string, text: string): string {
 }
 
 export function triggerDirectWhatsApp(phone: string, text: string): void {
+  if (!WHATSAPP_ENABLED) {
+    console.log('WhatsApp disabled')
+    return
+  }
+
   const link = getWhatsAppDeepLink(phone, text)
   window.location.href = link
 }
@@ -38,6 +45,11 @@ export function triggerDirectSMS(phone: string, text: string): void {
 }
 
 export function sendSOS(location: { lat: number; lng: number } | null): void {
+  if (!WHATSAPP_ENABLED) {
+    console.log('WhatsApp SOS disabled')
+    return
+  }
+
   if (!location) return alert('Location not available')
   const msg = `🚨 EMERGENCY ALERT!\n\nI may be in danger.\n\n📍 Live Location:\nhttps://maps.google.com/?q=${location.lat},${location.lng}\n\nSent from Rakshak AI.`
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank')
