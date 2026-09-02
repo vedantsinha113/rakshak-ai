@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Preferences } from '@capacitor/preferences'
 import type { Guardian } from '../types/guardian'
 import { formatPhoneWithCountryCode } from '../utils/whatsapp'
 import {
@@ -19,9 +20,7 @@ export default function GuardianSettings({
   onUpdate,
   onClose,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<'contacts' | 'telegram'>(
-    'contacts'
-  )
+  const [activeTab, setActiveTab] = useState<'contacts' | 'telegram'>('contacts')
 
   // Contact form
   const [name, setName] = useState('')
@@ -32,12 +31,34 @@ export default function GuardianSettings({
   const savedConfig = getTelegramConfig()
   const [botToken, setBotToken] = useState(savedConfig.token)
   const [chatId, setChatId] = useState(savedConfig.chatId)
-  const [testStatus, setTestStatus] = useState<
-    'idle' | 'testing' | 'success' | 'failed'
-  >('idle')
-  const [telegramSaved, setTelegramSaved] = useState(
-    isTelegramConfigured()
-  )
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle')
+  const [telegramSaved, setTelegramSaved] = useState(isTelegramConfigured())
+
+  // ✅ If token/chatId already saved in localStorage (web flow),
+  // auto copy them into Capacitor Preferences (native service reads Preferences)
+  useEffect(() => {
+    const migrateToPreferences = async () => {
+      try {
+        if (savedConfig.token?.trim() && savedConfig.chatId?.trim()) {
+          await Preferences.set({
+            key: 'rakshak_telegram_token',
+            value: savedConfig.token.trim(),
+          })
+          await Preferences.set({
+            key: 'rakshak_telegram_chatid',
+            value: savedConfig.chatId.trim(),
+          })
+        }
+      } catch (e) {
+        // ignore (web fallback etc)
+        console.log('Preferences migrate skipped:', e)
+      }
+    }
+
+    void migrateToPreferences()
+    // run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleAddContact = (e: React.FormEvent) => {
     e.preventDefault()
@@ -59,32 +80,65 @@ export default function GuardianSettings({
   }
 
   const handleDelete = (id: string) => {
-    onUpdate(guardians.filter((g) => g.id !== id))
+    const filtered = guardians.filter((g) => g.id !== id)
+
+    // if primary removed, make first one primary
+    const hasPrimary = filtered.some((g) => g.isPrimary)
+    const fixed = hasPrimary
+      ? filtered
+      : filtered.map((g, idx) => ({ ...g, isPrimary: idx === 0 }))
+
+    onUpdate(fixed)
   }
 
   const setPrimary = (id: string) => {
     onUpdate(guardians.map((g) => ({ ...g, isPrimary: g.id === id })))
   }
 
+  // ✅ Save Telegram to BOTH:
+  // 1) localStorage (web)
+  // 2) Capacitor Preferences (native Android service)
+  const saveTelegramEverywhere = async (token: string, cid: string) => {
+    // web storage
+    saveTelegramConfig(token, cid)
+
+    // native storage
+    try {
+      await Preferences.set({ key: 'rakshak_telegram_token', value: token })
+      await Preferences.set({ key: 'rakshak_telegram_chatid', value: cid })
+    } catch (e) {
+      console.log('Preferences save failed (maybe web):', e)
+    }
+  }
+
   const handleSaveTelegram = async () => {
-    if (!botToken.trim() || !chatId.trim()) {
+    const token = botToken.trim()
+    const cid = chatId.trim()
+
+    if (!token || !cid) {
       alert('Please enter both Bot Token and Chat ID!')
       return
     }
-    saveTelegramConfig(botToken.trim(), chatId.trim())
+
+    await saveTelegramEverywhere(token, cid)
     setTelegramSaved(true)
     setTestStatus('idle')
+    alert('✅ Telegram config saved!')
   }
 
   const handleTestTelegram = async () => {
-    if (!botToken.trim() || !chatId.trim()) {
-      alert('Save your Token and Chat ID first!')
+    const token = botToken.trim()
+    const cid = chatId.trim()
+
+    if (!token || !cid) {
+      alert('Please enter both Bot Token and Chat ID first!')
       return
     }
 
-    saveTelegramConfig(botToken.trim(), chatId.trim())
-    setTestStatus('testing')
+    // Save first, then test (important)
+    await saveTelegramEverywhere(token, cid)
 
+    setTestStatus('testing')
     const success = await testTelegramConnection()
 
     if (success) {
@@ -100,9 +154,7 @@ export default function GuardianSettings({
       <div className='w-full max-w-md rounded-3xl bg-white shadow-2xl overflow-hidden'>
         {/* Header */}
         <div className='flex items-center justify-between p-5 border-b border-gray-100'>
-          <h2 className='text-xl font-bold text-gray-900'>
-            🛡️ Safety Settings
-          </h2>
+          <h2 className='text-xl font-bold text-gray-900'>🛡️ Safety Settings</h2>
           <button
             onClick={onClose}
             className='rounded-full p-2 text-gray-400 hover:bg-gray-100'
@@ -123,6 +175,7 @@ export default function GuardianSettings({
           >
             📞 Emergency Contacts
           </button>
+
           <button
             onClick={() => setActiveTab('telegram')}
             className={`flex-1 py-3 text-sm font-semibold transition-all ${
@@ -131,10 +184,7 @@ export default function GuardianSettings({
                 : 'text-gray-400'
             }`}
           >
-            ✈️ Telegram Alert{' '}
-            {telegramSaved && (
-              <span className='ml-1 text-green-500'>✓</span>
-            )}
+            ✈️ Telegram Alert {telegramSaved && <span className='ml-1 text-green-500'>✓</span>}
           </button>
         </div>
 
@@ -157,9 +207,7 @@ export default function GuardianSettings({
                   />
                   <select
                     value={relation}
-                    onChange={(e) =>
-                      setRelation(e.target.value as Guardian['relation'])
-                    }
+                    onChange={(e) => setRelation(e.target.value as Guardian['relation'])}
                     className='rounded-xl border border-gray-300 px-2 py-2 text-sm focus:outline-none'
                   >
                     <option value='Mom'>Mom</option>
@@ -205,9 +253,7 @@ export default function GuardianSettings({
                     >
                       <div>
                         <div className='flex items-center gap-2'>
-                          <span className='font-semibold text-gray-900'>
-                            {g.name}
-                          </span>
+                          <span className='font-semibold text-gray-900'>{g.name}</span>
                           <span className='rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-700'>
                             {g.relation}
                           </span>
@@ -217,9 +263,7 @@ export default function GuardianSettings({
                             </span>
                           )}
                         </div>
-                        <p className='text-xs text-gray-500'>
-                          +{g.phone}
-                        </p>
+                        <p className='text-xs text-gray-500'>+{g.phone}</p>
                       </div>
 
                       <div className='flex items-center gap-1'>
@@ -248,90 +292,42 @@ export default function GuardianSettings({
           {/* TELEGRAM TAB */}
           {activeTab === 'telegram' && (
             <div className='space-y-4'>
-              {/* Step by Step Instructions */}
               <div className='rounded-2xl bg-blue-50 p-4 text-sm text-blue-900 space-y-3'>
-                <p className='font-bold text-base'>
-                  📖 How to Setup Telegram Auto-Alert
-                </p>
+                <p className='font-bold text-base'>📖 How to Setup Telegram Auto-Alert</p>
 
                 <div className='space-y-2'>
-                  <p className='font-semibold'>
-                    Step 1: Create Your Bot
+                  <p className='font-semibold'>Step 1: Create Your Bot</p>
+                  <p className='text-xs'>1. Open Telegram</p>
+                  <p className='text-xs'>
+                    2. Search <span className='font-bold bg-blue-100 px-1 rounded'>@BotFather</span>
                   </p>
                   <p className='text-xs'>
-                    1. Open Telegram app on your phone
+                    3. Send <span className='font-bold bg-blue-100 px-1 rounded'>/newbot</span>
                   </p>
                   <p className='text-xs'>
-                    2. Search:{' '}
-                    <span className='font-bold bg-blue-100 px-1 rounded'>
-                      @BotFather
-                    </span>
-                  </p>
-                  <p className='text-xs'>
-                    3. Send:{' '}
-                    <span className='font-bold bg-blue-100 px-1 rounded'>
-                      /newbot
-                    </span>
-                  </p>
-                  <p className='text-xs'>
-                    4. Give any name like:{' '}
-                    <span className='font-bold'>RakshakAlert</span>
-                  </p>
-                  <p className='text-xs'>
-                    5. Copy the{' '}
-                    <span className='font-bold text-red-700'>
-                      TOKEN
-                    </span>{' '}
-                    BotFather gives you
+                    4. Copy the <span className='font-bold text-red-700'>TOKEN</span>
                   </p>
                 </div>
 
                 <div className='space-y-2'>
                   <p className='font-semibold'>Step 2: Get Chat ID</p>
                   <p className='text-xs'>
-                    1. Search:{' '}
-                    <span className='font-bold bg-blue-100 px-1 rounded'>
-                      @userinfobot
-                    </span>{' '}
-                    in Telegram
+                    1. Search <span className='font-bold bg-blue-100 px-1 rounded'>@userinfobot</span>
                   </p>
                   <p className='text-xs'>
-                    2. Send:{' '}
-                    <span className='font-bold bg-blue-100 px-1 rounded'>
-                      /start
-                    </span>
+                    2. Send <span className='font-bold bg-blue-100 px-1 rounded'>/start</span>
                   </p>
                   <p className='text-xs'>
-                    3. Copy your{' '}
-                    <span className='font-bold text-red-700'>
-                      ID number
-                    </span>{' '}
-                    shown
-                  </p>
-                  <p className='text-xs text-blue-700 font-semibold'>
-                    💡 Tip: Parents ko bhi yahi steps karke apna Chat
-                    ID dena hoga taaki unhe alert aaye!
+                    3. Copy your <span className='font-bold text-red-700'>ID</span>
                   </p>
                 </div>
 
-                <div className='space-y-2'>
-                  <p className='font-semibold'>Step 3: Start Bot</p>
-                  <p className='text-xs'>
-                    1. Apne banaye hue bot ko Telegram me search karo
-                  </p>
-                  <p className='text-xs'>
-                    2. Send:{' '}
-                    <span className='font-bold bg-blue-100 px-1 rounded'>
-                      /start
-                    </span>
-                  </p>
-                  <p className='text-xs'>
-                    3. Neeche Token aur Chat ID daalo aur Test karo!
-                  </p>
+                <div className='text-xs font-semibold text-blue-700'>
+                  Important: Parent must open your bot once and send <b>/start</b>,
+                  otherwise Telegram will not deliver messages.
                 </div>
               </div>
 
-              {/* Token Input */}
               <div className='space-y-3'>
                 <div>
                   <label className='text-xs font-bold text-gray-700 mb-1 block'>
@@ -348,29 +344,26 @@ export default function GuardianSettings({
 
                 <div>
                   <label className='text-xs font-bold text-gray-700 mb-1 block'>
-                    💬 Your Chat ID (from @userinfobot)
+                    💬 Chat ID (from @userinfobot / group id)
                   </label>
                   <input
                     type='text'
-                    placeholder='e.g. 123456789'
+                    placeholder='e.g. 123456789 or -100xxxxxxxxxx'
                     value={chatId}
                     onChange={(e) => setChatId(e.target.value)}
                     className='w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:outline-none font-mono'
                   />
                 </div>
 
-                {/* Test Status */}
                 {testStatus === 'success' && (
                   <div className='rounded-xl bg-green-100 p-3 text-sm font-semibold text-green-800'>
-                    ✅ Connected! Check your Telegram for a test
-                    message!
+                    ✅ Connected! Check your Telegram for a test message.
                   </div>
                 )}
 
                 {testStatus === 'failed' && (
                   <div className='rounded-xl bg-red-100 p-3 text-sm font-semibold text-red-800'>
-                    ❌ Failed! Check Token & Chat ID. Make sure you
-                    sent /start to your bot first.
+                    ❌ Failed! Check Token/Chat ID and make sure you sent /start to your bot.
                   </div>
                 )}
 
@@ -385,9 +378,7 @@ export default function GuardianSettings({
                   disabled={testStatus === 'testing'}
                   className='w-full rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50'
                 >
-                  {testStatus === 'testing'
-                    ? '🔄 Testing...'
-                    : '🧪 Test & Save Telegram Alert'}
+                  {testStatus === 'testing' ? '🔄 Testing...' : '🧪 Test & Save Telegram Alert'}
                 </button>
 
                 <button
@@ -401,8 +392,7 @@ export default function GuardianSettings({
                   <div className='rounded-xl bg-green-50 border border-green-300 p-3 text-center text-sm font-semibold text-green-800'>
                     ✅ Telegram Auto-Alert is Active!
                     <p className='text-xs font-normal mt-1 text-green-700'>
-                      Emergency pe automatically Telegram message
-                      jayega
+                      Emergency pe automatically Telegram message jayega (Android background service)
                     </p>
                   </div>
                 )}

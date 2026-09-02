@@ -22,7 +22,6 @@ export default function App() {
 
   const [showSettings, setShowSettings] = useState(false)
   const [guardians, setGuardians] = useState<Guardian[]>(getGuardians())
-
   const [nativeTs, setNativeTs] = useState<string | null>(null)
 
   const handleGuardiansUpdate = (updated: Guardian[]) => {
@@ -30,7 +29,7 @@ export default function App() {
     saveGuardians(updated)
   }
 
-  // ✅ Sync React UI with native service emergency flag
+  // Sync React UI with native service emergency flag
   const syncNativeEmergency = async () => {
     const active = await Preferences.get({ key: NATIVE_KEYS.active })
     const t = await Preferences.get({ key: NATIVE_KEYS.type })
@@ -41,7 +40,7 @@ export default function App() {
       setIsEmergency(true)
       setType(((t.value as EmergencyType) || 'ROAD_ACCIDENT') as EmergencyType)
       setNativeTs(ts.value || null)
-      setStatus('🚨 Emergency detected in background. Alert already sent to guardian.')
+      setStatus('🚨 Emergency detected in background. Alert is/was being processed.')
     } else {
       setIsEmergency(false)
       setNativeTs(null)
@@ -53,14 +52,11 @@ export default function App() {
     // location for UI (optional)
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-        },
+        (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
         () => {}
       )
     }
 
-    // initial sync
     void syncNativeEmergency()
 
     // when app comes to foreground
@@ -72,7 +68,7 @@ export default function App() {
     const onFocus = () => void syncNativeEmergency()
     window.addEventListener('focus', onFocus)
 
-    // safety: periodic sync (in case Android delivered intent while webview already running)
+    // periodic sync (in case notification intent arrives while webview already running)
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void syncNativeEmergency()
     }, 1200)
@@ -85,7 +81,7 @@ export default function App() {
   }, [])
 
   const onSafe = async () => {
-    // ✅ clear native flag so service can trigger again
+    // clear native flag so service can trigger again
     await Preferences.set({ key: NATIVE_KEYS.active, value: '0' })
     await Preferences.remove({ key: NATIVE_KEYS.type })
     await Preferences.remove({ key: NATIVE_KEYS.ts })
@@ -129,9 +125,7 @@ export default function App() {
         {isEmergency ? (
           <div className="space-y-3 text-left">
             <div className="rounded-xl bg-red-50 p-3 text-center">
-              <p className="text-sm font-bold text-red-700">
-                {type.replace(/_/g, ' ')}
-              </p>
+              <p className="text-sm font-bold text-red-700">{type.replace(/_/g, ' ')}</p>
               <p className="text-xs text-red-600">
                 {firstAid.severity} • {firstAid.title}
               </p>
@@ -192,7 +186,7 @@ export default function App() {
           <div className="rounded-2xl bg-gray-100 p-4 text-sm text-gray-700">
             Background monitoring is ON (Foreground Service).
             <div className="mt-2 text-xs text-gray-500">
-              Tip: Settings me Telegram token/chatId set karo to auto alerts jayenge.
+              Voice + Fall detection background me native service handle karega.
             </div>
           </div>
         )}
